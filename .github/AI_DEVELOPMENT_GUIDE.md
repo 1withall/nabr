@@ -20,7 +20,7 @@
 
 ---
 
-## <a name="philosophy"></a>1. Philosophy: Why AI-First?
+## 1. Philosophy: Why AI-First?
 
 ### Core Principles
 
@@ -49,7 +49,7 @@
 
 ---
 
-## <a name="structure"></a>2. Project Structure
+## 2. Project Structure
 
 ```
 nabr/
@@ -152,7 +152,7 @@ nabr/
 
 ---
 
-## <a name="navigation"></a>3. Quick Navigation Guide
+## 3. Quick Navigation Guide
 
 ### "I need to understand..."
 
@@ -199,7 +199,7 @@ nabr/
 
 ---
 
-## <a name="adding-features"></a>4. Adding New Features
+## 4. Adding New Features
 
 ### Adding a New API Endpoint
 
@@ -540,7 +540,7 @@ async def get_message(message_id: str):
 
 ---
 
-## <a name="patterns"></a>5. Modular Patterns
+## 5. Modular Patterns
 
 ### Pattern 1: Registry Pattern
 
@@ -644,7 +644,7 @@ class MyNewWorkflow:
 
 ---
 
-## <a name="common-tasks"></a>6. Common Tasks
+## 6. Common Tasks
 
 ### Task: Add Validation to Existing Endpoint
 
@@ -745,7 +745,7 @@ async def my_function(db: AsyncSession, user_id: str):
 
 ---
 
-## <a name="testing"></a>7. Testing Strategy
+## 7. Testing Strategy
 
 ### Unit Tests
 
@@ -794,7 +794,7 @@ async def test_verification_workflow():
 
 ---
 
-## <a name="troubleshooting"></a>8. Troubleshooting
+## 8. Troubleshooting
 
 ### Issue: Import Errors
 

@@ -1,11 +1,31 @@
-"""Authentication routes for user registration, login, and token management.
+"""
+Authentication routes for the Nābr API.
 
-This module provides endpoints for:
-- User registration (both requesters and volunteers)
-- Login with email/password
+Provides endpoints for:
+- User registration (all user types: individual, business, organization)
+- User login (JWT authentication)
 - Token refresh
 - Current user information
 """
+
+import json
+from datetime import timedelta
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from nabr.core.config import get_settings
+from nabr.core.security import (
+    create_access_token,
+    create_refresh_token,
+    get_password_hash,
+    verify_password,
+    decode_token,
+)
+from nabr.db.session import get_db
+from nabr.models.user import User, UserType, IndividualProfile, BusinessProfile, OrganizationProfile
 
 import json
 
@@ -46,8 +66,8 @@ async def register(
 ) -> UserResponse:
     """Register a new user account.
     
-    Creates a new user with the specified type (requester or volunteer).
-    For volunteers, also creates an empty VolunteerProfile.
+    Creates a new user with the specified type (individual, business, or organization).
+    Each user type gets a corresponding profile with unique fields and workflows.
     
     Args:
         user_data: Registration details including email, password, and user type
@@ -93,15 +113,31 @@ async def register(
     db.add(new_user)
     await db.flush()  # Flush to get the user ID
     
-    # If volunteer, create empty profile
-    if user_data.user_type == UserType.VOLUNTEER:
-        volunteer_profile = VolunteerProfile(
+    # Create user-type-specific profile
+    if user_data.user_type == UserType.INDIVIDUAL:
+        profile = IndividualProfile(
             user_id=new_user.id,
-            skills=json.dumps([]),  # Store as JSON string
-            certifications=json.dumps([]),  # Store as JSON string
-            max_distance_km=10.0,
+            skills=json.dumps([]),
+            interests=json.dumps([]),
+            max_distance_km=25.0,
         )
-        db.add(volunteer_profile)
+        db.add(profile)
+    elif user_data.user_type == UserType.BUSINESS:
+        profile = BusinessProfile(
+            user_id=new_user.id,
+            business_name=user_data.full_name,  # Use full_name as business name initially
+            services_offered=json.dumps([]),
+            resources_available=json.dumps([]),
+        )
+        db.add(profile)
+    elif user_data.user_type == UserType.ORGANIZATION:
+        profile = OrganizationProfile(
+            user_id=new_user.id,
+            organization_name=user_data.full_name,  # Use full_name as org name initially
+            programs_offered=json.dumps([]),
+            service_areas=json.dumps([]),
+        )
+        db.add(profile)
     
     await db.commit()
     await db.refresh(new_user)

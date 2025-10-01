@@ -10,7 +10,7 @@ from nabr.core.config import get_settings
 from nabr.db.session import Base
 
 # Import all models to ensure they're registered with Base
-from nabr.models.user import User, VolunteerProfile, Verification
+from nabr.models.user import User, IndividualProfile, BusinessProfile, OrganizationProfile, Verification
 from nabr.models.request import Request
 from nabr.models.review import Review
 

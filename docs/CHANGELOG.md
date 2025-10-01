@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### [2025-10-01] - Major Restructure: 3 User Types with Unique Workflows 🔄
+
+#### Breaking Changes
+- **Removed "volunteer" user type** - System now supports only 3 user types: individual, business, organization
+- **Replaced VolunteerProfile** with three separate profile models:
+  - `IndividualProfile` - For community members (can request AND provide assistance)
+  - `BusinessProfile` - For local businesses offering services/resources
+  - `OrganizationProfile` - For non-profits and community groups
+- **Removed background check fields** entirely for privacy compliance
+- **Renamed request fields**:
+  - `volunteer_id` → `acceptor_id` (anyone can accept requests)
+  - `num_volunteers_needed` → `participants_needed`
+  - Removed `required_certifications` field
+- **Updated review types**:
+  - `REQUESTER_TO_VOLUNTEER` → `REQUESTER_TO_ACCEPTOR`
+  - `VOLUNTEER_TO_REQUESTER` → `ACCEPTOR_TO_REQUESTER`
+
+#### Added - User Type Specific Profiles
+- Created `IndividualProfile` model:
+  - Fields: skills, interests, availability_schedule, max_distance_km (25km default)
+  - Emergency contact fields (name, phone)
+  - Languages spoken
+  - Most flexible user type - can both request and provide assistance
+- Created `BusinessProfile` model:
+  - Fields: business_name, business_type, tax_id, website
+  - Services offered and resources available (JSON arrays)
+  - Business hours and service area radius (50km default)
+  - Business license and insurance verification flags
+- Created `OrganizationProfile` model:
+  - Fields: organization_name, organization_type, tax_id, mission_statement
+  - Programs offered and service areas (JSON arrays)
+  - Staff count and volunteer capacity tracking
+  - Non-profit status verification and accreditations
+
+#### Changed - Database Schema
+- Updated User model relationships:
+  - Added `individual_profile`, `business_profile`, `organization_profile` relationships
+  - Replaced `volunteer_profile` relationship
+  - Changed `requests_claimed` → `requests_accepted`
+- Updated Request model:
+  - `acceptor_id` foreign key replaces `volunteer_id`
+  - `acceptor` relationship replaces `volunteer`
+  - More generic terminology for flexible user types
+
+#### Migration
+- Generated migration `61358bb5b352_restructure_user_types_and_profiles`
+- Applied migration successfully - tables restructured:
+  - Dropped `volunteer_profiles` table
+  - Created `individual_profiles` table
+  - Created `business_profiles` table
+  - Created `organization_profiles` table
+  - Updated foreign keys and indexes in requests table
+
+#### Updated - Authentication & API
+- Updated registration endpoint to create appropriate profile based on user_type
+- Removed volunteer-specific logic from auth routes
+- Updated schema examples to show 3 user types (not 4)
+- Updated model exports in `nabr.models.__init__`
+- Fixed alembic env.py imports for new profile models
+
+#### Documentation
+- Created new README_NEW.md with:
+  - Detailed description of each user type
+  - Unique capabilities and workflows per type
+  - Updated architecture documentation
+  - Migration history
+- Updated inline documentation in models
+- Clarified user type purposes and separation
+
+#### Security & Privacy
+- **Removed all background check references** for privacy compliance
+- Each user type has appropriate verification requirements:
+  - Individuals: Two-party community verification
+  - Businesses: Business license and insurance verification
+  - Organizations: Non-profit status and accreditation verification
+
+#### Rationale
+- **User Type Clarity**: "Volunteer" was ambiguous - individuals can both give and receive help
+- **Workflow Separation**: Each user type needs distinct workflows, dashboards, and features
+- **Business Logic**: Businesses and organizations have fundamentally different needs than individuals
+- **Privacy**: Background checks removed to reduce sensitive data storage
+- **Scalability**: Separate profiles allow independent evolution of each user type's features
+
 ### [2025-10-01] - Phase 2A: FastAPI Application & Authentication System ✅
 
 #### Added - FastAPI Main Application

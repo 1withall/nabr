@@ -22,10 +22,14 @@ from nabr.db.session import Base
 
 
 class ReviewType(str, PyEnum):
-    """Review type enumeration."""
+    """Review type enumeration.
+    
+    Reviews are bidirectional - both parties can review each other
+    after a completed interaction.
+    """
 
-    REQUESTER_TO_VOLUNTEER = "requester_to_volunteer"
-    VOLUNTEER_TO_REQUESTER = "volunteer_to_requester"
+    REQUESTER_TO_ACCEPTOR = "requester_to_acceptor"
+    ACCEPTOR_TO_REQUESTER = "acceptor_to_requester"
 
 
 class Review(Base):

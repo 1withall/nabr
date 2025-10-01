@@ -22,10 +22,15 @@ from nabr.db.session import Base
 
 
 class UserType(str, PyEnum):
-    """User account type enumeration."""
+    """User account type enumeration.
+    
+    Each user type has unique workflows, profiles, and capabilities:
+    - INDIVIDUAL: People seeking or offering assistance in the community
+    - BUSINESS: Local businesses contributing resources or services
+    - ORGANIZATION: Non-profits, community groups, and institutions
+    """
 
     INDIVIDUAL = "individual"
-    VOLUNTEER = "volunteer"
     BUSINESS = "business"
     ORGANIZATION = "organization"
 
@@ -87,8 +92,20 @@ class User(Base):
     verified_at = Column(DateTime, nullable=True)
     
     # Relationships
-    volunteer_profile = relationship(
-        "VolunteerProfile",
+    individual_profile = relationship(
+        "IndividualProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    business_profile = relationship(
+        "BusinessProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    organization_profile = relationship(
+        "OrganizationProfile",
         back_populates="user",
         uselist=False,
         cascade="all, delete-orphan",
@@ -105,10 +122,10 @@ class User(Base):
         back_populates="requester",
         cascade="all, delete-orphan",
     )
-    requests_claimed = relationship(
+    requests_accepted = relationship(
         "Request",
-        foreign_keys="[Request.volunteer_id]",
-        back_populates="volunteer",
+        foreign_keys="[Request.acceptor_id]",
+        back_populates="acceptor",
     )
     reviews_given = relationship(
         "Review",
@@ -126,10 +143,14 @@ class User(Base):
         return f"<User(id={self.id}, username={self.username}, type={self.user_type})>"
 
 
-class VolunteerProfile(Base):
-    """Extended profile for volunteers."""
+class IndividualProfile(Base):
+    """Extended profile for individual users.
+    
+    Individuals can both request and provide assistance within the community.
+    They have the most flexible role in the platform.
+    """
 
-    __tablename__ = "volunteer_profiles"
+    __tablename__ = "individual_profiles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(
@@ -139,31 +160,121 @@ class VolunteerProfile(Base):
         unique=True,
     )
     
-    # Skills and capabilities
+    # Skills and capabilities (for offering help)
     skills = Column(Text, nullable=True)  # JSON array stored as text
-    certifications = Column(Text, nullable=True)  # JSON array stored as text
-    experience_years = Column(Integer, default=0)
+    interests = Column(Text, nullable=True)  # JSON array of interests
     
     # Availability
     availability_schedule = Column(Text, nullable=True)  # JSON schedule
-    max_distance_km = Column(Float, default=50.0)
+    max_distance_km = Column(Float, default=25.0)
     
     # Preferences
-    preferred_request_types = Column(Text, nullable=True)  # JSON array
+    preferred_assistance_types = Column(Text, nullable=True)  # JSON array
     languages_spoken = Column(Text, nullable=True)  # JSON array
     
-    # Background check info (stored securely)
-    background_check_completed = Column(Boolean, default=False)
-    background_check_date = Column(DateTime, nullable=True)
+    # Emergency contact
+    emergency_contact_name = Column(String(100), nullable=True)
+    emergency_contact_phone = Column(String(20), nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user = relationship("User", back_populates="volunteer_profile")
+    user = relationship("User", back_populates="individual_profile")
 
     def __repr__(self) -> str:
-        return f"<VolunteerProfile(user_id={self.user_id})>"
+        return f"<IndividualProfile(user_id={self.user_id})>"
+
+
+class BusinessProfile(Base):
+    """Extended profile for business users.
+    
+    Businesses can offer services, resources, or sponsorship to community members.
+    They have unique workflows for resource allocation and impact tracking.
+    """
+
+    __tablename__ = "business_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    
+    # Business information
+    business_name = Column(String(200), nullable=False)
+    business_type = Column(String(100), nullable=True)  # e.g., "Restaurant", "Retail"
+    tax_id = Column(String(50), nullable=True)  # EIN or similar
+    website = Column(String(255), nullable=True)
+    
+    # Services and resources
+    services_offered = Column(Text, nullable=True)  # JSON array
+    resources_available = Column(Text, nullable=True)  # JSON array
+    
+    # Operating details
+    business_hours = Column(Text, nullable=True)  # JSON schedule
+    service_area_radius_km = Column(Float, default=50.0)
+    
+    # Verification documents
+    business_license_verified = Column(Boolean, default=False)
+    insurance_verified = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="business_profile")
+
+    def __repr__(self) -> str:
+        return f"<BusinessProfile(user_id={self.user_id}, business={self.business_name})>"
+
+
+class OrganizationProfile(Base):
+    """Extended profile for organization users.
+    
+    Organizations (non-profits, community groups, institutions) coordinate
+    larger-scale assistance efforts and have workflows for program management.
+    """
+
+    __tablename__ = "organization_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    
+    # Organization information
+    organization_name = Column(String(200), nullable=False)
+    organization_type = Column(String(100), nullable=True)  # e.g., "Non-Profit", "Community Group"
+    tax_id = Column(String(50), nullable=True)  # EIN for non-profits
+    website = Column(String(255), nullable=True)
+    mission_statement = Column(Text, nullable=True)
+    
+    # Programs and services
+    programs_offered = Column(Text, nullable=True)  # JSON array
+    service_areas = Column(Text, nullable=True)  # JSON array of geographic areas
+    
+    # Capacity
+    staff_count = Column(Integer, nullable=True)
+    volunteer_capacity = Column(Integer, nullable=True)
+    
+    # Verification
+    nonprofit_status_verified = Column(Boolean, default=False)
+    accreditation = Column(Text, nullable=True)  # JSON array of accreditations
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="organization_profile")
+
+    def __repr__(self) -> str:
+        return f"<OrganizationProfile(user_id={self.user_id}, org={self.organization_name})>"
 
 
 class Verification(Base):

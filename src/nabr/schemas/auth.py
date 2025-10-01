@@ -72,18 +72,18 @@ class RegisterRequest(BaseSchema):
     )
     user_type: str = Field(
         default="individual",
-        description="Type of user account",
-        examples=["individual", "volunteer", "business", "organization"]
+        description="Type of user account: individual, business, or organization",
+        examples=["individual", "business", "organization"]
     )
     
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "email": "newvolunteer@nabr.app",
+                "email": "newuser@nabr.app",
                 "password": "SecurePass123!",
                 "full_name": "Jane Doe",
                 "phone_number": "+1234567890",
-                "user_type": "volunteer"
+                "user_type": "individual"
             }
         }
     )

@@ -57,7 +57,11 @@ class RequestType(str, PyEnum):
 
 
 class Request(Base):
-    """Volunteer assistance request model."""
+    """Community assistance request model.
+    
+    Requests can be created by any user type and accepted by any verified user
+    who has the capability to fulfill the request.
+    """
 
     __tablename__ = "requests"
 
@@ -68,7 +72,7 @@ class Request(Base):
         nullable=False,
         index=True,
     )
-    volunteer_id = Column(
+    acceptor_id = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
@@ -92,9 +96,8 @@ class Request(Base):
     
     # Requirements
     required_skills = Column(Text, nullable=True)  # JSON array
-    required_certifications = Column(Text, nullable=True)  # JSON array
     estimated_duration_hours = Column(Float, nullable=True)
-    num_volunteers_needed = Column(Integer, default=1)
+    participants_needed = Column(Integer, default=1)
     
     # Scheduling
     requested_start_date = Column(DateTime, nullable=False)
@@ -121,7 +124,7 @@ class Request(Base):
     
     # Relationships
     requester = relationship("User", foreign_keys=[requester_id], back_populates="requests_created")
-    volunteer = relationship("User", foreign_keys=[volunteer_id], back_populates="requests_claimed")
+    acceptor = relationship("User", foreign_keys=[acceptor_id], back_populates="requests_accepted")
     reviews = relationship("Review", back_populates="request", cascade="all, delete-orphan")
     event_logs = relationship("RequestEventLog", back_populates="request", cascade="all, delete-orphan")
 
