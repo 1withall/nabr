@@ -95,36 +95,30 @@ class User(Base):
     )
     verifications_received = relationship(
         "Verification",
-        foreign_keys="Verification.user_id",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-    verifications_received = relationship(
-        "Verification",
-        foreign_keys="Verification.user_id",
+        foreign_keys="[Verification.user_id]",
         back_populates="user",
         cascade="all, delete-orphan",
     )
     requests_created = relationship(
         "Request",
-        foreign_keys="Request.requester_id",
+        foreign_keys="[Request.requester_id]",
         back_populates="requester",
         cascade="all, delete-orphan",
     )
     requests_claimed = relationship(
         "Request",
-        foreign_keys="Request.volunteer_id",
+        foreign_keys="[Request.volunteer_id]",
         back_populates="volunteer",
     )
     reviews_given = relationship(
         "Review",
-        foreign_keys="Review.reviewer_id",
+        foreign_keys="[Review.reviewer_id]",
         back_populates="reviewer",
         cascade="all, delete-orphan",
     )
     reviews_received = relationship(
         "Review",
-        foreign_keys="Review.reviewee_id",
+        foreign_keys="[Review.reviewee_id]",
         back_populates="reviewee",
     )
 

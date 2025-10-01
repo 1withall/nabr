@@ -11,7 +11,12 @@ from nabr.core.config import get_settings
 settings = get_settings()
 
 # Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Using argon2 as recommended by FastAPI/OWASP for modern applications
+# Argon2 won the Password Hashing Competition in 2015
+pwd_context = CryptContext(
+    schemes=["argon2"],
+    deprecated="auto",
+)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -20,7 +25,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def get_password_hash(password: str) -> str:
-    """Generate a hashed password from a plain password."""
+    """Generate a hashed password from a plain password.
+    
+    Args:
+        password: Plain text password
+        
+    Returns:
+        Hashed password string
+    """
     return pwd_context.hash(password)
 
 
