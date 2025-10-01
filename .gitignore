@@ -1,14 +1,131 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+*.pyo
+*.pyd
 build/
 dist/
 wheels/
 *.egg-info
+*.egg
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
 
 # Virtual environments
 .venv
+venv/
+ENV/
+env/
+.virtualenv
 
-# .env files
+# Environment and secrets (CRITICAL - NEVER COMMIT)
 .env
 .env.*
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+secrets.json
+credentials.json
+
+# Database files (local development only)
+*.db
+*.sqlite
+*.sqlite3
+data/
+*.sql
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# Docker volumes and data
+docker-compose.override.yml
+.dockerignore
+
+# Alembic
+alembic.ini
+
+# Testing
+.tox/
+.nox/
+htmlcov/
+
+# Distribution / packaging
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+
+# Security and certificates
+*.crt
+*.csr
+*.key
+*.pem
+*.der
+*.p7b
+*.p7c
+*.pfx
+*.p12
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Node modules (if frontend added later)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Keep example environment file
+!.env.example
