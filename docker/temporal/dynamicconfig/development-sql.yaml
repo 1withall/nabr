@@ -1,0 +1,15 @@
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}
+
+system.enableActivityEagerExecution:
+  - value: true
+    constraints: {}
+
+history.maxAutoResetPoints:
+  - value: 50
+    constraints: {}
+
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
