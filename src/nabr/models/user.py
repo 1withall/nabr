@@ -75,6 +75,7 @@ class User(Base):
     
     # Ratings and statistics
     rating = Column(Float, default=0.0)
+    total_reviews = Column(Integer, default=0)  # Total reviews received
     total_requests_completed = Column(Integer, default=0)
     total_requests_received = Column(Integer, default=0)
     total_verifications_performed = Column(Integer, default=0)
@@ -92,10 +93,10 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-    verifications_given = relationship(
+    verifications_received = relationship(
         "Verification",
-        foreign_keys="Verification.verifier_id",
-        back_populates="verifier",
+        foreign_keys="Verification.user_id",
+        back_populates="user",
         cascade="all, delete-orphan",
     )
     verifications_received = relationship(
@@ -172,7 +173,12 @@ class VolunteerProfile(Base):
 
 
 class Verification(Base):
-    """User verification records."""
+    """
+    User verification records.
+    
+    Implements two-party verification system where each user must be
+    verified by two other verified users.
+    """
 
     __tablename__ = "verifications"
 
@@ -183,16 +189,23 @@ class Verification(Base):
         nullable=False,
         index=True,
     )
-    verifier_id = Column(
+    
+    # Two-party verification
+    verifier1_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    verifier2_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     
     # Verification data
-    verification_method = Column(String(50), nullable=False)  # "qr_code", "id_scan", etc.
-    verification_code = Column(String(255), nullable=True, unique=True)
+    verification_code = Column(String(255), nullable=True, unique=True, index=True)
     id_document_hash = Column(String(255), nullable=True)  # Hash of ID for verification
     
     # Location where verification occurred
@@ -210,15 +223,17 @@ class Verification(Base):
     rejection_reason = Column(Text, nullable=True)
     
     # Temporal workflow ID for tracking
-    workflow_id = Column(String(255), nullable=True, index=True)
+    temporal_workflow_id = Column(String(255), nullable=True, index=True)
     
+    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    expires_at = Column(DateTime, nullable=True)
+    verified_at = Column(DateTime, nullable=True)  # When verification completed
+    expires_at = Column(DateTime, nullable=True)   # When verification expires
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="verifications_received")
-    verifier = relationship("User", foreign_keys=[verifier_id], back_populates="verifications_given")
+    verifier1 = relationship("User", foreign_keys=[verifier1_id])
+    verifier2 = relationship("User", foreign_keys=[verifier2_id])
 
     def __repr__(self) -> str:
         return f"<Verification(id={self.id}, user_id={self.user_id}, status={self.status})>"
