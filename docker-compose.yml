@@ -18,47 +18,27 @@ services:
       timeout: 5s
       retries: 5
 
-  # Temporal Server
+  # Temporal Server (All-in-One with SQLite, Web UI, and CLI)
   temporal:
-    image: temporalio/auto-setup:1.25.2
+    image: temporalio/temporal:1.4.1
     container_name: nabr-temporal
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - DB=postgresql
-      - DB_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:-nabr}
-      - POSTGRES_PWD=${POSTGRES_PASSWORD:-changeme}
-      - POSTGRES_SEEDS=postgres
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
-      - ENABLE_ES=false
-      - ES_SEEDS=
-      - ES_VERSION=
-      - SKIP_SCHEMA_SETUP=false
-      - SKIP_DEFAULT_NAMESPACE_CREATION=false
+    command:
+      - server
+      - start-dev
+      - --ip
+      - "0.0.0.0"
+      - --db-filename
+      - "/data/temporal.db"
     ports:
       - "7233:7233"  # gRPC endpoint
+      - "8233:8233"  # Web UI
     volumes:
-      - ./docker/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
+      - ./data/temporal:/data
     healthcheck:
-      test: ["CMD", "tctl", "--address", "localhost:7233", "cluster", "health"]
-      interval: 5s
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 10s
       timeout: 5s
       retries: 30
-
-  # Temporal Web UI
-  temporal-web:
-    image: temporalio/ui:2.32.0
-    container_name: nabr-temporal-ui
-    depends_on:
-      temporal:
-        condition: service_healthy
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
-    ports:
-      - "8080:8080"
 
   # FastAPI Backend
   backend:
@@ -120,4 +100,6 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  temporal_data:
     driver: local

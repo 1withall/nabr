@@ -249,7 +249,7 @@ class VerifierProfile(Base):
     authorized_at = Column(DateTime, nullable=True)  # When first authorized
     
     # Relationships
-    user = relationship("User", back_populates="verifier_profile")
+    user = relationship("User", back_populates="verifier_profile", foreign_keys=[user_id])
     revoker = relationship("User", foreign_keys=[revoked_by])
     credential_validations = relationship(
         "VerifierCredentialValidation",

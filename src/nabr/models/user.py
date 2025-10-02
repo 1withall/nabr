@@ -134,6 +134,7 @@ class User(Base):
     verifier_profile = relationship(
         "VerifierProfile",
         back_populates="user",
+        foreign_keys="[VerifierProfile.user_id]",
         uselist=False,
         cascade="all, delete-orphan",
     )
