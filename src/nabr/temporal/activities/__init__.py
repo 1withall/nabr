@@ -6,7 +6,7 @@ Activities are the workhorses that perform actual work with side effects.
 
 ## Directory Structure:
 - base.py: Base classes and utilities for all activities
-- verification.py: Verification-related activities
+- verification/: Modular verification activities (QR generation, authorization, trust scoring, etc.)
 - matching.py: Request matching activities
 - review.py: Review submission activities
 - notification.py: Notification and communication activities
@@ -22,100 +22,80 @@ Activities are the workhorses that perform actual work with side effects.
 7. Add to appropriate module and __all__ list
 """
 
-# Import all activities for easy registration
+# Import all verification activities from modular package
 from nabr.temporal.activities.verification import (
-    generate_verification_qr_code,
+    # QR Generation
+    generate_verification_qr_codes,
+    # Verifier Authorization
+    check_verifier_authorization,
+    validate_verifier_credentials,
+    revoke_verifier_status,
+    # Progressive Trust
+    calculate_trust_score_activity,
+    award_verification_points,
+    # Events
+    record_verification_event,
+    # Notifications
+    send_level_change_notification,
+    send_verification_email,
+    send_verification_sms,
+    send_verification_notifications,
+    # Saga Compensation
+    invalidate_qr_codes,
+    revoke_confirmations,
+    # Document Validation
     validate_id_document,
-    update_verification_status,
-    log_verification_event,
+    queue_for_human_review,
 )
-from nabr.temporal.activities.matching import (
-    find_candidate_volunteers,
-    calculate_match_scores,
-    notify_volunteers,
-    assign_request_to_volunteer,
-    log_matching_event,
-)
-from nabr.temporal.activities.review import (
-    validate_review_eligibility,
-    save_review,
-    update_user_rating,
-    check_for_moderation,
-    notify_reviewee,
-    log_review_event,
-)
-from nabr.temporal.activities.notification import (
-    send_email,
-    send_sms,
-    notify_user,
-)
+
 
 # Activity lists for worker registration
 verification_activities = [
-    generate_verification_qr_code,
+    # QR Generation
+    generate_verification_qr_codes,
+    # Verifier Authorization
+    check_verifier_authorization,
+    validate_verifier_credentials,
+    revoke_verifier_status,
+    # Progressive Trust
+    calculate_trust_score_activity,
+    award_verification_points,
+    # Events
+    record_verification_event,
+    # Notifications
+    send_level_change_notification,
+    send_verification_email,
+    send_verification_sms,
+    send_verification_notifications,
+    # Saga Compensation
+    invalidate_qr_codes,
+    revoke_confirmations,
+    # Document Validation
     validate_id_document,
-    update_verification_status,
-    log_verification_event,
+    queue_for_human_review,
 ]
 
-matching_activities = [
-    find_candidate_volunteers,
-    calculate_match_scores,
-    notify_volunteers,
-    assign_request_to_volunteer,
-    log_matching_event,
-]
-
-review_activities = [
-    validate_review_eligibility,
-    save_review,
-    update_user_rating,
-    check_for_moderation,
-    notify_reviewee,
-    log_review_event,
-]
-
-notification_activities = [
-    send_email,
-    send_sms,
-    notify_user,
-]
-
-# All activities combined
-all_activities = (
-    verification_activities
-    + matching_activities
-    + review_activities
-    + notification_activities
-)
+# All activities combined (add others as they're implemented)
+all_activities = verification_activities
 
 __all__ = [
+    # Verification Activities
+    "generate_verification_qr_codes",
+    "check_verifier_authorization",
+    "validate_verifier_credentials",
+    "revoke_verifier_status",
+    "calculate_trust_score_activity",
+    "award_verification_points",
+    "record_verification_event",
+    "send_level_change_notification",
+    "send_verification_email",
+    "send_verification_sms",
+    "send_verification_notifications",
+    "invalidate_qr_codes",
+    "revoke_confirmations",
+    "validate_id_document",
+    "queue_for_human_review",
     # Lists
     "verification_activities",
-    "matching_activities",
-    "review_activities",
-    "notification_activities",
     "all_activities",
-    # Verification
-    "generate_verification_qr_code",
-    "validate_id_document",
-    "update_verification_status",
-    "log_verification_event",
-    # Matching
-    "find_candidate_volunteers",
-    "calculate_match_scores",
-    "notify_volunteers",
-    "assign_request_to_volunteer",
-    "log_matching_event",
-    # Review
-    "validate_review_eligibility",
-    "save_review",
-    "update_user_rating",
-    "check_for_moderation",
-    "notify_reviewee",
-    "log_review_event",
-    # Notification
-    "send_email",
-    "send_sms",
-    "notify_user",
 ]
