@@ -17,8 +17,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - nabr-network
 
   # Temporal Server
   temporal:
@@ -48,8 +46,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-    networks:
-      - nabr-network
 
   # Temporal Web UI
   temporal-web:
@@ -63,8 +59,6 @@ services:
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
     ports:
       - "8080:8080"
-    networks:
-      - nabr-network
 
   # FastAPI Backend
   backend:
@@ -94,8 +88,6 @@ services:
       - ./src:/app/src:ro
       - ./data:/app/data
     command: uvicorn nabr.main:app --host 0.0.0.0 --port 8000 --reload
-    networks:
-      - nabr-network
     restart: unless-stopped
 
   # Temporal Worker
@@ -124,13 +116,7 @@ services:
       - ./src:/app/src:ro
       - ./data:/app/data
     command: python -m nabr.temporal.worker
-    networks:
-      - nabr-network
     restart: unless-stopped
-
-networks:
-  nabr-network:
-    driver: bridge
 
 volumes:
   postgres_data:

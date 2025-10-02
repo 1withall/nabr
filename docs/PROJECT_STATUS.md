@@ -68,36 +68,47 @@ The Nābr MVP foundation has been successfully established with a complete, prod
 
 ## 🚧 In Progress / Next Steps
 
-### Phase 1: Core API & Schemas (Next Priority)
-- [ ] Create Pydantic schemas for all models
-- [ ] Implement FastAPI main application
-- [ ] Create API routes:
-  - [ ] Authentication routes (login, register, refresh)
-  - [ ] User profile routes
-  - [ ] Verification routes
-  - [ ] Request routes
-  - [ ] Review routes
-- [ ] Implement authentication dependencies
-- [ ] Add request validation
-- [ ] Add error handling middleware
+### Phase 2C: Verification System - Database Models (Current Priority)
+- [x] Design tiered verification system (6 levels)
+- [x] Create verification type enums and requirements
+- [x] Implement 9 verification activities
+- [x] Add QR code generation capability
+- [ ] Create verification database models:
+  - [ ] Verification model (updated for tiered system)
+  - [ ] VerificationMethod completion tracking
+  - [ ] VerifierProfile model with credentials
+  - [ ] VerifierCredential validation records
+  - [ ] QR token storage and expiration
+- [ ] Integrate activities with database
+- [ ] Update VerificationWorkflow
+- [ ] Test end-to-end verification flow
 
-### Phase 2: Temporal Workflows
-- [ ] Implement Verification Workflow:
-  - [ ] Generate QR codes
-  - [ ] Process verification events
-  - [ ] Update verification status
-  - [ ] Handle expiration
-- [ ] Implement Request Matching Workflow:
-  - [ ] Calculate matching scores
-  - [ ] Notify matched volunteers
-  - [ ] Handle acceptances/rejections
-  - [ ] Manage request lifecycle
-- [ ] Implement Review Workflow:
-  - [ ] Trigger review requests after completion
-  - [ ] Process review submissions
-  - [ ] Update user ratings
-  - [ ] Handle moderation flags
-- [ ] Create Temporal Activities for all workflows
+### Phase 2D: Matching & Review Activities (Next)
+- [ ] Implement matching activities
+- [ ] Implement review activities
+- [ ] Implement notification activities
+- [ ] Create corresponding workflows
+
+### Phase 1: Core API & Schemas (Completed ✅)
+- [x] Create Pydantic schemas for all models
+- [x] Implement FastAPI main application
+- [x] Create API routes:
+  - [x] Authentication routes (login, register, refresh)
+  - [x] User profile routes
+  - [x] Verification routes
+  - [x] Request routes
+  - [x] Review routes
+- [x] Implement authentication dependencies
+- [x] Add request validation
+- [x] Add error handling middleware
+
+### Phase 2A-B: Temporal Infrastructure (Completed ✅)
+- [x] Multi-queue worker architecture (4 queues)
+- [x] WorkerManager with ThreadPoolExecutor
+- [x] SystemBootstrapWorkflow for initialization
+- [x] Bootstrap activities (migrations, health checks)
+- [x] Startup/shutdown scripts
+- [x] Workflow definitions with dedicated queues
 - [ ] Implement Worker process
 - [ ] Add workflow testing utilities
 

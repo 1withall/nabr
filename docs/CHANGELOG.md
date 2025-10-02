@@ -7,7 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### [2025-10-01] - Phase 2C: Verification Activities & Tiered Verification System ✅
+
+#### Added - Tiered Verification System
+- **Multi-Level Verification Framework** in `src/nabr/models/verification_types.py`:
+  - **6 Verification Levels**: UNVERIFIED → MINIMAL → BASIC → STANDARD → ENHANCED → COMPLETE
+  - **11 Verification Methods**: email, phone, government_id, in_person_two_party, business_license, tax_id, notary, organization_501c3, professional_license, community_leader, biometric
+  - **7 Verifier Credential Types**: notary_public, attorney, community_leader, verified_business_owner, organization_director, government_official, trusted_verifier
+  - **User-Type Specific Paths**: Different verification requirements for individuals, businesses, and organizations
+  - **VERIFICATION_REQUIREMENTS dict**: Maps user types to required methods per level
+  - **Verifier Minimums**: Must be STANDARD level or higher with credentials
+  - **Auto-Qualified Credentials**: Notaries, attorneys, and officials auto-qualify as verifiers
+
+#### Added - Verification Activities
+- **9 Comprehensive Verification Activities** in `src/nabr/temporal/activities/verification.py`:
+  - **QR Code Generation** (`generate_verification_qr_codes`):
+    - Generates two unique QR codes for two-party verification
+    - Uses qrcode library with high error correction
+    - Base64-encoded PNG images for easy display
+    - Secure tokens (32-byte URL-safe) per verifier
+    - 7-day expiration on QR codes
+  - **Verifier Authorization** (`check_verifier_authorization`):
+    - Validates verifier meets STANDARD level minimum
+    - Checks verifier credentials (notary, attorney, etc.)
+    - Verifies not revoked
+    - Supports auto-qualified credentials
+    - Tracks verification count for TRUSTED_VERIFIER status (50+ verifications)
+  - **Credential Validation** (`validate_verifier_credentials`):
+    - Validates notary commissions with state databases
+    - Verifies attorney bar membership
+    - Confirms organization leadership roles
+    - Checks credential expiration
+    - Records issuing authority
+  - **Verifier Revocation** (`revoke_verifier_status`):
+    - Revokes verifier authorization for cause
+    - Records revocation reason and timestamp
+    - Notifies affected verifier
+    - Tracks who performed revocation
+  - **Level Calculation** (`calculate_verification_level`):
+    - Calculates current level based on completed methods
+    - User-type aware (different requirements per type)
+    - Returns next level and requirements
+    - Computes progress percentage
+  - **Level Updates** (`update_user_verification_level`):
+    - Updates user verification level after method completion
+    - Records verification method in history
+    - Sends level-up notifications
+    - Tracks timestamps
+  - **Verifier Confirmation** (`record_verifier_confirmation`):
+    - Records when verifier confirms identity
+    - Supports two separate verifiers
+    - Captures location and notes
+    - Increments verifier's confirmation count
+  - **Completion Check** (`check_verification_complete`):
+    - Checks if both verifiers have confirmed
+    - Returns completion status per verifier
+    - Used by workflow to determine next steps
+  - **Notifications** (`send_verification_notifications`):
+    - 6 notification types (started, confirmed, complete, level_increased, verifier_authorized, verifier_revoked)
+    - Multi-channel support (in-app, email, SMS, push)
+    - Comprehensive notification data
+
+#### Added - Dependencies
+- **QR Code Generation**: `qrcode==8.2` with `pillow==11.3.0`
+  - High error correction for reliability
+  - PNG format for universal compatibility
+  - Base64 encoding for easy web/mobile display
+  - Customizable size and border
+
+#### Technical Notes - Verification System Design
+- **Database-Ready**: All activities have commented database integration code
+- **Temporal Best Practices**: All activities use `@activity.defn` decorator
+- **Comprehensive Documentation**: Every function has detailed docstrings
+- **Modular Design**: Each activity is independent and composable
+- **Type Safety**: Full type hints with proper return types
+- **Error Handling**: Prepared for retry logic via Temporal
+- **Audit Trail**: All actions timestamp and track actors
+- **Revocable Status**: Verifiers can lose authorization
+- **Tiered Requirements**: Progressive verification path per user type
+
 ### [2025-10-01] - Phase 2B: Temporal Multi-Worker Architecture 🏗️
+
+#### Changed - Docker Networking
+- **Removed custom bridge network** (`nabr-network`):
+  - All services now use Docker Compose default network
+  - Simplifies configuration without losing functionality
+  - Services can still communicate via service names (e.g., `postgres`, `temporal`)
+  - Docker Compose automatically creates a default network for the project
+  - Reduced complexity while maintaining inter-service connectivity
 
 #### Added - Temporal Workflow Infrastructure
 - **Multi-Queue Worker Architecture** (following official Temporal best practices):

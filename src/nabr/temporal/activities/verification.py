@@ -1,262 +1,574 @@
 """
-Verification activities.
+Verification activities for tiered identity verification.
 
 Activities for user verification workflow including QR code generation,
-document validation, and status updates.
+multi-level verification, and verifier authorization.
+
+Verification System:
+- Tiered levels: Unverified → Minimal → Basic → Standard → Enhanced → Complete
+- Multiple verification methods per user type
+- Authorized verifiers with credentials
+- Revocable verifier status
 """
 
+import io
+import base64
 import secrets
 import hashlib
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Any
+from uuid import UUID
+
+import qrcode
 from temporalio import activity
-from sqlalchemy import select, update
-from datetime import datetime, timedelta
 
-from nabr.temporal.activities.base import ActivityBase, log_activity_execution
-from nabr.models.user import User
-from nabr.models.verification import Verification
-from nabr.models.request import RequestEventLog
-
-
-@activity.defn
-@log_activity_execution
-async def generate_verification_qr_code(user_id: str) -> str:
-    """
-    Generate unique QR code for user verification.
-    
-    Creates a secure, unique verification code that can be encoded
-    into a QR code for in-person scanning by verifiers.
-    
-    Args:
-        user_id: UUID of user requesting verification
-        
-    Returns:
-        str: Unique verification code (e.g., "VERIFY-ABC123XYZ")
-        
-    Notes:
-        - Code is cryptographically secure
-        - Code format: "VERIFY-" + 12 uppercase alphanumeric characters
-        - Idempotent: Returns existing code if verification already exists
-    """
-    from nabr.db.session import AsyncSessionLocal
-    
-    async with AsyncSessionLocal() as db:
-        # Check if verification already exists
-        result = await db.execute(
-            select(Verification)
-            .where(Verification.user_id == user_id)
-            .where(Verification.status == "pending")
-        )
-        existing = result.scalar_one_or_none()
-        
-        if existing and existing.verification_code:
-            activity.logger.info(f"Returning existing code for user {user_id}")
-            return existing.verification_code
-        
-        # Generate new secure code
-        random_bytes = secrets.token_bytes(16)
-        code_suffix = secrets.token_hex(6).upper()  # 12 chars
-        verification_code = f"VERIFY-{code_suffix}"
-        
-        # Create or update verification record
-        if existing:
-            existing.verification_code = verification_code
-        else:
-            verification = Verification(
-                user_id=user_id,
-                verification_code=verification_code,
-                status="pending",
-                expires_at=datetime.utcnow() + timedelta(days=365),
-            )
-            db.add(verification)
-        
-        await db.commit()
-        
-        activity.logger.info(f"Generated verification code for user {user_id}")
-        return verification_code
+# Will be imported when database integration is complete
+# from nabr.db.session import AsyncSessionLocal
+# from nabr.models.user import User, Verification, VerificationStatus
+# from nabr.models.verification_types import (
+#     VerificationLevel,
+#     VerificationMethod,
+#     VerifierCredential,
+#     VERIFIER_MINIMUM_LEVEL,
+#     AUTO_VERIFIER_CREDENTIALS,
+# )
 
 
-@activity.defn
-@log_activity_execution
-async def validate_id_document(document_url: str) -> bool:
-    """
-    Validate uploaded ID document.
-    
-    Performs basic validation on uploaded ID document.
-    In production, would integrate with document verification service.
-    
-    Args:
-        document_url: URL to uploaded ID document
-        
-    Returns:
-        bool: True if document is valid, False otherwise
-        
-    Notes:
-        - Currently performs basic checks
-        - TODO: Integrate with ID verification service (e.g., Jumio, Onfido)
-        - Should check document authenticity, match user data
-    """
-    activity.logger.info(f"Validating document: {document_url}")
-    
-    # Basic validation
-    if not document_url or len(document_url) < 10:
-        activity.logger.warning("Invalid document URL")
-        return False
-    
-    # Check URL format
-    valid_extensions = [".jpg", ".jpeg", ".png", ".pdf"]
-    if not any(document_url.lower().endswith(ext) for ext in valid_extensions):
-        activity.logger.warning(f"Invalid document format: {document_url}")
-        return False
-    
-    # TODO: Integrate with document verification service
-    # For MVP, we'll accept all valid URLs
-    activity.logger.info("Document validation passed")
-    return True
+# ============================================================================
+# QR Code Generation Activities
+# ============================================================================
 
-
-@activity.defn
-@log_activity_execution
-async def update_verification_status(
+@activity.defn(name="generate_verification_qr_codes")
+async def generate_verification_qr_codes(
+    verification_id: str,
     user_id: str,
-    status: str,
-    verifier1_id: Optional[str] = None,
-    verifier2_id: Optional[str] = None,
-) -> bool:
+    user_name: str,
+) -> Dict[str, Any]:
     """
-    Update verification status in database.
+    Generate unique QR codes for two-party verification.
     
-    Updates both the verification record and user's verification status.
-    Idempotent: Safe to call multiple times with same status.
+    Creates two separate QR codes that verifiers scan to confirm identity.
+    Each QR code contains:
+    - Verification ID
+    - Secure token (different for each verifier)
+    - Timestamp
+    - User information
     
     Args:
+        verification_id: UUID of verification record
         user_id: UUID of user being verified
-        status: New status (pending, verified, rejected, expired)
-        verifier1_id: Optional first verifier UUID
-        verifier2_id: Optional second verifier UUID
+        user_name: Name to display in QR code
         
     Returns:
-        bool: True if update successful
-        
-    Notes:
-        - Updates both Verification and User tables
-        - Sets verified_at timestamp if status is "verified"
-        - Idempotent: Can be called multiple times safely
+        Dictionary containing:
+        - qr_code_1: Base64-encoded PNG image
+        - qr_code_2: Base64-encoded PNG image
+        - token_1: Secure token for verifier 1
+        - token_2: Secure token for verifier 2
+        - expires_at: When QR codes expire
     """
-    from nabr.db.session import AsyncSessionLocal
+    activity.logger.info(f"Generating QR codes for verification {verification_id}")
     
-    async with AsyncSessionLocal() as db:
-        # Update verification record
-        verification_result = await db.execute(
-            select(Verification)
-            .where(Verification.user_id == user_id)
-            .order_by(Verification.created_at.desc())
-            .limit(1)
+    # Generate secure tokens for each verifier
+    token_1 = secrets.token_urlsafe(32)
+    token_2 = secrets.token_urlsafe(32)
+    
+    # QR codes expire in 7 days
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    
+    # Create QR code data
+    base_url = "https://nabr.app/verify"  # TODO: Get from config
+    qr_data_1 = f"{base_url}/{verification_id}/{token_1}"
+    qr_data_2 = f"{base_url}/{verification_id}/{token_2}"
+    
+    # Generate QR code images
+    def generate_qr_image(data: str) -> str:
+        """Generate QR code and return as base64-encoded PNG."""
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.ERROR_CORRECT_H,
+            box_size=10,
+            border=4,
         )
-        verification = verification_result.scalar_one_or_none()
+        qr.add_data(data)
+        qr.make(fit=True)
         
-        if not verification:
-            activity.logger.error(f"No verification found for user {user_id}")
-            return False
+        img = qr.make_image(fill_color="black", back_color="white")
         
-        # Update verification fields
-        verification.status = status
-        if verifier1_id:
-            verification.verifier1_id = verifier1_id
-        if verifier2_id:
-            verification.verifier2_id = verifier2_id
-        if status == "verified":
-            verification.verified_at = datetime.utcnow()
+        # Convert to base64
+        buffer = io.BytesIO()
+        img.save(buffer, 'PNG')
+        buffer.seek(0)
+        img_base64 = base64.b64encode(buffer.getvalue()).decode()
         
-        # Update user's verification status
-        user_result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = user_result.scalar_one_or_none()
-        
-        if user:
-            user.is_verified = (status == "verified")
-            user.verification_status = status
-        
-        await db.commit()
-        
-        activity.logger.info(
-            f"Updated verification status for user {user_id} to {status}"
-        )
-        return True
+        return img_base64
+    
+    qr_code_1 = generate_qr_image(qr_data_1)
+    qr_code_2 = generate_qr_image(qr_data_2)
+    
+    activity.logger.info(f"Generated QR codes for user {user_name}")
+    
+    # TODO: Store tokens in database for validation
+    # async with AsyncSessionLocal() as db:
+    #     verification = await db.get(Verification, UUID(verification_id))
+    #     verification.verifier1_token = token_1
+    #     verification.verifier2_token = token_2
+    #     verification.qr_expires_at = expires_at
+    #     await db.commit()
+    
+    return {
+        "qr_code_1": qr_code_1,
+        "qr_code_2": qr_code_2,
+        "token_1": token_1,
+        "token_2": token_2,
+        "expires_at": expires_at.isoformat(),
+        "qr_url_1": qr_data_1,
+        "qr_url_2": qr_data_2,
+    }
 
 
-@activity.defn
-@log_activity_execution
-async def log_verification_event(
+# ============================================================================
+# Verifier Authorization Activities
+# ============================================================================
+
+@activity.defn(name="check_verifier_authorization")
+async def check_verifier_authorization(
+    verifier_id: str,
+    user_type: str,
+) -> Dict[str, Any]:
+    """
+    Check if a user is authorized to verify others.
+    
+    Requirements to be a verifier:
+    - Must be at STANDARD verification level or higher
+    - Must have verifier credentials (notary, attorney, community leader, etc.)
+    - Must not be revoked
+    - Must have completed verification training (future)
+    
+    Args:
+        verifier_id: UUID of potential verifier
+        user_type: Type of user being verified (affects requirements)
+        
+    Returns:
+        Dictionary with authorization status and details
+    """
+    activity.logger.info(f"Checking verifier authorization for {verifier_id}")
+    
+    # TODO: Implement database query
+    # async with AsyncSessionLocal() as db:
+    #     verifier = await db.get(User, UUID(verifier_id))
+    #     
+    #     # Check verification level
+    #     if verifier.verification_level < VerificationLevel.STANDARD:
+    #         return {
+    #             "authorized": False,
+    #             "reason": "Verifier must be at STANDARD verification level or higher",
+    #         }
+    #     
+    #     # Check for credentials
+    #     verifier_profile = await db.get(VerifierProfile, UUID(verifier_id))
+    #     if not verifier_profile:
+    #         return {
+    #             "authorized": False,
+    #             "reason": "No verifier profile found",
+    #         }
+    #     
+    #     # Check if revoked
+    #     if verifier_profile.revoked:
+    #         return {
+    #             "authorized": False,
+    #             "reason": "Verifier status has been revoked",
+    #             "revoked_at": verifier_profile.revoked_at,
+    #             "revocation_reason": verifier_profile.revocation_reason,
+    #         }
+    #     
+    #     # Check credentials
+    #     credentials = verifier_profile.credentials
+    #     auto_qualified = any(cred in AUTO_VERIFIER_CREDENTIALS for cred in credentials)
+    #     
+    #     if auto_qualified:
+    #         return {
+    #             "authorized": True,
+    #             "credentials": credentials,
+    #             "auto_qualified": True,
+    #         }
+    #     
+    #     # Check verification count for TRUSTED_VERIFIER status
+    #     if verifier.total_verifications_performed >= 50:
+    #         return {
+    #             "authorized": True,
+    #             "credentials": [VerifierCredential.TRUSTED_VERIFIER],
+    #             "verification_count": verifier.total_verifications_performed,
+    #         }
+    
+    # Placeholder response
+    return {
+        "authorized": True,  # TODO: Replace with actual logic
+        "credentials": ["trusted_verifier"],
+        "verification_level": "standard",
+        "verifications_performed": 25,
+    }
+
+
+@activity.defn(name="validate_verifier_credentials")
+async def validate_verifier_credentials(
+    verifier_id: str,
+    credential_type: str,
+    credential_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Validate verifier credentials (notary license, attorney bar number, etc.).
+    
+    Different credentials require different validation:
+    - NOTARY_PUBLIC: Verify notary commission with state database
+    - ATTORNEY: Verify bar membership
+    - COMMUNITY_LEADER: Verify organization leadership role
+    - etc.
+    
+    Args:
+        verifier_id: UUID of verifier
+        credential_type: Type of credential to validate
+        credential_data: Credential information (license numbers, etc.)
+        
+    Returns:
+        Dictionary with validation results
+    """
+    activity.logger.info(
+        f"Validating {credential_type} credentials for verifier {verifier_id}"
+    )
+    
+    # TODO: Implement actual credential validation
+    # This would involve:
+    # - API calls to state licensing databases
+    # - Bar association lookups
+    # - Organization verification
+    # - Document verification
+    
+    # Placeholder
+    return {
+        "valid": True,
+        "credential_type": credential_type,
+        "verified_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+        "issuing_authority": "State of California",  # Example
+    }
+
+
+@activity.defn(name="revoke_verifier_status")
+async def revoke_verifier_status(
+    verifier_id: str,
+    reason: str,
+    revoked_by: str,
+) -> Dict[str, Any]:
+    """
+    Revoke a user's verifier authorization.
+    
+    Reasons for revocation:
+    - Credential expiration
+    - Misconduct
+    - False verification
+    - User request
+    - Administrative action
+    
+    Args:
+        verifier_id: UUID of verifier to revoke
+        reason: Reason for revocation
+        revoked_by: UUID of admin/system revoking status
+        
+    Returns:
+        Dictionary with revocation details
+    """
+    activity.logger.info(f"Revoking verifier status for {verifier_id}: {reason}")
+    
+    # TODO: Implement database update
+    # async with AsyncSessionLocal() as db:
+    #     verifier_profile = await db.get(VerifierProfile, UUID(verifier_id))
+    #     verifier_profile.revoked = True
+    #     verifier_profile.revoked_at = datetime.now(timezone.utc)
+    #     verifier_profile.revocation_reason = reason
+    #     verifier_profile.revoked_by = UUID(revoked_by)
+    #     await db.commit()
+    #     
+    #     # Notify verifier
+    #     await send_notification(
+    #         user_id=verifier_id,
+    #         type="verifier_status_revoked",
+    #         data={"reason": reason}
+    #     )
+    
+    return {
+        "revoked": True,
+        "verifier_id": verifier_id,
+        "reason": reason,
+        "revoked_at": datetime.now(timezone.utc).isoformat(),
+        "revoked_by": revoked_by,
+    }
+
+
+# ============================================================================
+# Verification Level Management Activities
+# ============================================================================
+
+@activity.defn(name="calculate_verification_level")
+async def calculate_verification_level(
     user_id: str,
-    event_type: str,
-    event_data: Optional[dict] = None,
-) -> str:
+    user_type: str,
+    completed_methods: List[str],
+) -> Dict[str, Any]:
     """
-    Log verification event for audit trail.
+    Calculate user's verification level based on completed methods.
     
-    Creates immutable event log entry for verification process.
+    Different user types have different requirements:
+    - Individual: Email → Phone → ID → Two-party
+    - Business: Email → Phone → License → Tax ID → Owner
+    - Organization: Email → Phone → 501(c)(3) → Tax ID → Director
     
     Args:
-        user_id: UUID of user being verified
-        event_type: Type of event (e.g., "qr_code_generated", "verifier_confirmed")
-        event_data: Optional additional event data
+        user_id: UUID of user
+        user_type: Type of user (individual, business, organization)
+        completed_methods: List of completed verification methods
         
     Returns:
-        str: UUID of created event log entry
-        
-    Notes:
-        - Creates immutable audit log
-        - Used for compliance and transparency
-        - Events are never deleted, only appended
+        Dictionary with calculated verification level and requirements
     """
-    from nabr.db.session import AsyncSessionLocal
-    import uuid
+    activity.logger.info(
+        f"Calculating verification level for {user_type} user {user_id}"
+    )
     
-    async with AsyncSessionLocal() as db:
-        # For MVP, we'll create a simple event log
-        # In production, might use separate events table
-        event = {
-            "event_type": event_type,
-            "user_id": user_id,
-            "event_data": event_data or {},
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-        
-        activity.logger.info(f"Logged event: {event}")
-        
-        # TODO: Store in dedicated events table
-        # For now, just log it
-        
-        return str(uuid.uuid4())
+    # TODO: Implement actual level calculation based on VERIFICATION_REQUIREMENTS
+    # from nabr.models.verification_types import VERIFICATION_REQUIREMENTS
+    # 
+    # requirements = VERIFICATION_REQUIREMENTS.get(user_type, {})
+    # completed_set = set(completed_methods)
+    # 
+    # # Check each level from highest to lowest
+    # for level in reversed(list(VerificationLevel)):
+    #     required_methods = set(requirements.get(level, []))
+    #     if required_methods.issubset(completed_set):
+    #         return {
+    #             "level": level,
+    #             "completed_methods": completed_methods,
+    #             "next_level": get_next_level(level),
+    #             "next_requirements": get_next_requirements(level, user_type),
+    #         }
+    
+    # Placeholder
+    return {
+        "level": "basic",
+        "completed_methods": completed_methods,
+        "next_level": "standard",
+        "next_requirements": ["government_id", "in_person_two_party"],
+        "progress_percentage": 60,
+    }
 
 
-@activity.defn
-@log_activity_execution
-async def hash_id_document(document_content: bytes) -> str:
+@activity.defn(name="update_user_verification_level")
+async def update_user_verification_level(
+    user_id: str,
+    new_level: str,
+    method_completed: str,
+) -> Dict[str, Any]:
     """
-    Generate secure hash of ID document.
-    
-    Creates SHA-256 hash of document for verification without storing
-    the actual document long-term.
+    Update user's verification level after completing a method.
     
     Args:
-        document_content: Raw bytes of ID document
+        user_id: UUID of user
+        new_level: New verification level to set
+        method_completed: Verification method that was just completed
         
     Returns:
-        str: SHA-256 hash of document (hex encoded)
-        
-    Notes:
-        - Allows verification of document integrity
-        - Doesn't store actual document (privacy)
-        - Can verify same document used later
+        Dictionary with update status
     """
-    activity.logger.info("Hashing ID document")
+    activity.logger.info(
+        f"Updating user {user_id} to level {new_level} (completed: {method_completed})"
+    )
     
-    hash_obj = hashlib.sha256()
-    hash_obj.update(document_content)
-    document_hash = hash_obj.hexdigest()
+    # TODO: Implement database update
+    # async with AsyncSessionLocal() as db:
+    #     user = await db.get(User, UUID(user_id))
+    #     old_level = user.verification_level
+    #     user.verification_level = new_level
+    #     user.verification_updated_at = datetime.now(timezone.utc)
+    #     
+    #     # Record the verification method completion
+    #     method_record = VerificationMethodRecord(
+    #         user_id=UUID(user_id),
+    #         method=method_completed,
+    #         completed_at=datetime.now(timezone.utc),
+    #     )
+    #     db.add(method_record)
+    #     await db.commit()
+    #     
+    #     # Send notification
+    #     await send_notification(
+    #         user_id=user_id,
+    #         type="verification_level_increased",
+    #         data={
+    #             "old_level": old_level,
+    #             "new_level": new_level,
+    #             "method": method_completed,
+    #         }
+    #     )
     
-    activity.logger.info(f"Generated document hash: {document_hash[:16]}...")
-    return document_hash
+    return {
+        "updated": True,
+        "user_id": user_id,
+        "new_level": new_level,
+        "method_completed": method_completed,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ============================================================================
+# Two-Party Verification Activities
+# ============================================================================
+
+@activity.defn(name="record_verifier_confirmation")
+async def record_verifier_confirmation(
+    verification_id: str,
+    verifier_id: str,
+    verifier_number: int,  # 1 or 2
+    confirmation_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Record a verifier's confirmation of identity.
+    
+    Stores:
+    - Which verifier confirmed (1 or 2)
+    - When confirmation occurred
+    - Location of confirmation (if provided)
+    - Any notes from verifier
+    
+    Args:
+        verification_id: UUID of verification record
+        verifier_id: UUID of verifier
+        verifier_number: 1 for first verifier, 2 for second
+        confirmation_data: Additional data (location, notes, etc.)
+        
+    Returns:
+        Dictionary with confirmation details
+    """
+    activity.logger.info(
+        f"Recording confirmation from verifier {verifier_number} "
+        f"for verification {verification_id}"
+    )
+    
+    # TODO: Implement database update
+    # async with AsyncSessionLocal() as db:
+    #     verification = await db.get(Verification, UUID(verification_id))
+    #     
+    #     if verifier_number == 1:
+    #         verification.verifier1_id = UUID(verifier_id)
+    #         verification.verifier1_confirmed_at = datetime.now(timezone.utc)
+    #         verification.verifier1_location = confirmation_data.get("location")
+    #         verification.verifier1_notes = confirmation_data.get("notes")
+    #     else:
+    #         verification.verifier2_id = UUID(verifier_id)
+    #         verification.verifier2_confirmed_at = datetime.now(timezone.utc)
+    #         verification.verifier2_location = confirmation_data.get("location")
+    #         verification.verifier2_notes = confirmation_data.get("notes")
+    #     
+    #     await db.commit()
+    #     
+    #     # Increment verifier's count
+    #     verifier = await db.get(User, UUID(verifier_id))
+    #     verifier.total_verifications_performed += 1
+    #     await db.commit()
+    
+    return {
+        "recorded": True,
+        "verification_id": verification_id,
+        "verifier_id": verifier_id,
+        "verifier_number": verifier_number,
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "location": confirmation_data.get("location"),
+    }
+
+
+@activity.defn(name="check_verification_complete")
+async def check_verification_complete(
+    verification_id: str,
+) -> Dict[str, Any]:
+    """
+    Check if verification is complete (both verifiers confirmed).
+    
+    Args:
+        verification_id: UUID of verification record
+        
+    Returns:
+        Dictionary with completion status
+    """
+    activity.logger.info(f"Checking if verification {verification_id} is complete")
+    
+    # TODO: Implement database query
+    # async with AsyncSessionLocal() as db:
+    #     verification = await db.get(Verification, UUID(verification_id))
+    #     
+    #     complete = (
+    #         verification.verifier1_id is not None and
+    #         verification.verifier2_id is not None and
+    #         verification.verifier1_confirmed_at is not None and
+    #         verification.verifier2_confirmed_at is not None
+    #     )
+    #     
+    #     return {
+    #         "complete": complete,
+    #         "verifier1_confirmed": verification.verifier1_id is not None,
+    #         "verifier2_confirmed": verification.verifier2_id is not None,
+    #     }
+    
+    # Placeholder
+    return {
+        "complete": False,
+        "verifier1_confirmed": True,
+        "verifier2_confirmed": False,
+    }
+
+
+# ============================================================================
+# Notification Activities
+# ============================================================================
+
+@activity.defn(name="send_verification_notifications")
+async def send_verification_notifications(
+    user_id: str,
+    notification_type: str,
+    data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Send notifications related to verification process.
+    
+    Notification types:
+    - verification_started: QR codes generated
+    - verifier_confirmed: One verifier confirmed
+    - verification_complete: Both verifiers confirmed
+    - level_increased: Verification level upgraded
+    - verifier_authorized: User authorized as verifier
+    - verifier_revoked: Verifier status revoked
+    
+    Args:
+        user_id: UUID of user to notify
+        notification_type: Type of notification
+        data: Notification data
+        
+    Returns:
+        Dictionary with notification status
+    """
+    activity.logger.info(
+        f"Sending {notification_type} notification to user {user_id}"
+    )
+    
+    # TODO: Implement actual notification sending
+    # This would involve:
+    # - In-app notifications
+    # - Email notifications
+    # - Push notifications
+    # - SMS notifications (for critical events)
+    
+    return {
+        "sent": True,
+        "user_id": user_id,
+        "notification_type": notification_type,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "channels": ["in_app", "email"],
+    }
