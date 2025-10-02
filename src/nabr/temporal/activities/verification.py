@@ -1,14 +1,16 @@
 """
-Verification activities for tiered identity verification.
+Verification activities for progressive trust identity verification.
 
 Activities for user verification workflow including QR code generation,
-multi-level verification, and verifier authorization.
+multi-method verification, verifier authorization, and trust score calculation.
 
-Verification System:
-- Tiered levels: Unverified → Minimal → Basic → Standard → Enhanced → Complete
+Progressive Trust System:
+- Point-based trust accumulation (not hard requirements)
+- Tiered levels: Unverified → Minimal (100+) → Standard (250+) → Enhanced (400+) → Complete (600+)
 - Multiple verification methods per user type
 - Authorized verifiers with credentials
-- Revocable verifier status
+- Method expiry and renewal
+- Email/phone are OPTIONAL (30 points each)
 """
 
 import io
@@ -586,4 +588,440 @@ async def send_verification_notifications(
         "notification_type": notification_type,
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "channels": ["in_app", "email"],
+    }
+
+
+# ============================================================================
+# Progressive Trust System Activities (Phase 2C Extended)
+# ============================================================================
+
+@activity.defn(name="calculate_trust_score_activity")
+async def calculate_trust_score_activity(
+    user_id: str,
+    completed_methods: Dict[str, int],
+    user_type: str,
+) -> Dict[str, Any]:
+    """
+    Calculate total trust score from completed verification methods.
+    
+    Uses the progressive trust scoring model from verification_types.py.
+    
+    Args:
+        user_id: UUID of user
+        completed_methods: Dict mapping method name to count (for multipliers)
+        user_type: Type of user (INDIVIDUAL, BUSINESS, ORGANIZATION)
+        
+    Returns:
+        Dictionary with trust_score, verification_level, next_level_info
+    """
+    activity.logger.info(
+        f"Calculating trust score for {user_type} user {user_id}"
+    )
+    
+    # TODO: Import and use actual calculation functions
+    # from nabr.models.verification_types import (
+    #     calculate_trust_score,
+    #     calculate_verification_level,
+    #     get_next_level_requirements,
+    #     VerificationMethod,
+    #     UserType,
+    # )
+    # 
+    # # Convert string keys to VerificationMethod enum
+    # method_dict = {
+    #     VerificationMethod(method): count
+    #     for method, count in completed_methods.items()
+    # }
+    # 
+    # trust_score = calculate_trust_score(method_dict, UserType(user_type))
+    # level = calculate_verification_level(trust_score)
+    # next_level, points_needed, suggested = get_next_level_requirements(
+    #     trust_score, UserType(user_type), set(method_dict.keys())
+    # )
+    
+    # Placeholder calculation
+    total_score = sum(completed_methods.values()) * 30  # Rough estimate
+    
+    return {
+        "trust_score": total_score,
+        "verification_level": "minimal" if total_score >= 100 else "unverified",
+        "completed_methods": completed_methods,
+        "next_level": "standard",
+        "points_needed": max(0, 250 - total_score),
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="validate_verifier_credentials")
+async def validate_verifier_credentials_activity(
+    verifier_ids: List[str],
+    method: str,
+) -> Dict[str, Any]:
+    """
+    Validate that verifiers are authorized for a specific verification method.
+    
+    Args:
+        verifier_ids: List of verifier UUIDs to validate
+        method: Verification method they're performing
+        
+    Returns:
+        Dictionary with all_valid flag and invalid_verifiers list
+    """
+    activity.logger.info(
+        f"Validating {len(verifier_ids)} verifiers for method {method}"
+    )
+    
+    # TODO: Implement actual validation
+    # async with AsyncSessionLocal() as db:
+    #     invalid_verifiers = []
+    #     for verifier_id in verifier_ids:
+    #         verifier = await db.get(User, UUID(verifier_id))
+    #         verifier_profile = await db.get(VerifierProfile, UUID(verifier_id))
+    #         
+    #         # Check level requirement
+    #         if verifier.verification_level < VERIFIER_MINIMUM_LEVEL:
+    #             invalid_verifiers.append({
+    #                 "verifier_id": verifier_id,
+    #                 "reason": "Insufficient verification level"
+    #             })
+    #             continue
+    #         
+    #         # Check credentials
+    #         if not verifier_profile or verifier_profile.revoked:
+    #             invalid_verifiers.append({
+    #                 "verifier_id": verifier_id,
+    #                 "reason": "No valid verifier profile"
+    #             })
+    #             continue
+    #     
+    #     return {
+    #         "all_valid": len(invalid_verifiers) == 0,
+    #         "invalid_verifiers": invalid_verifiers,
+    #         "validated_count": len(verifier_ids) - len(invalid_verifiers),
+    #     }
+    
+    # Placeholder
+    return {
+        "all_valid": True,
+        "invalid_verifiers": [],
+        "validated_count": len(verifier_ids),
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="record_verifier_confirmations")
+async def record_verifier_confirmations(
+    user_id: str,
+    confirmations: List[Dict[str, Any]],
+    method: str,
+) -> Dict[str, Any]:
+    """
+    Record multiple verifier confirmations in database.
+    
+    Args:
+        user_id: UUID of user being verified
+        confirmations: List of confirmation dicts with verifier_id, confirmed_at, location
+        method: Verification method (e.g., IN_PERSON_TWO_PARTY)
+        
+    Returns:
+        Dictionary with recorded confirmation IDs
+    """
+    activity.logger.info(
+        f"Recording {len(confirmations)} verifier confirmations for user {user_id}"
+    )
+    
+    # TODO: Implement database storage
+    # async with AsyncSessionLocal() as db:
+    #     confirmation_ids = []
+    #     for conf in confirmations:
+    #         record = VerificationEvent(
+    #             user_id=UUID(user_id),
+    #             method=method,
+    #             event_type="verifier_confirmation",
+    #             verifier_id=UUID(conf["verifier_id"]),
+    #             confirmed_at=datetime.fromisoformat(conf["confirmed_at"]),
+    #             location_lat=conf.get("location_lat"),
+    #             location_lon=conf.get("location_lon"),
+    #         )
+    #         db.add(record)
+    #         confirmation_ids.append(str(record.id))
+    #     
+    #     await db.commit()
+    #     return {
+    #         "recorded": True,
+    #         "confirmation_ids": confirmation_ids,
+    #         "count": len(confirmations),
+    #     }
+    
+    # Placeholder
+    return {
+        "recorded": True,
+        "confirmation_ids": [f"conf-{i}" for i in range(len(confirmations))],
+        "count": len(confirmations),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="invalidate_qr_codes")
+async def invalidate_qr_codes(
+    qr_codes: List[str],
+) -> Dict[str, Any]:
+    """
+    Invalidate QR codes (compensation for saga).
+    
+    Args:
+        qr_codes: List of QR code tokens to invalidate
+        
+    Returns:
+        Dictionary with invalidation status
+    """
+    activity.logger.info(f"Invalidating {len(qr_codes)} QR codes")
+    
+    # TODO: Implement database update
+    # async with AsyncSessionLocal() as db:
+    #     for qr_code in qr_codes:
+    #         # Mark QR code as invalid in database
+    #         await db.execute(
+    #             update(QRCode)
+    #             .where(QRCode.token == qr_code)
+    #             .values(invalidated=True, invalidated_at=datetime.now(timezone.utc))
+    #         )
+    #     await db.commit()
+    
+    return {
+        "invalidated": True,
+        "count": len(qr_codes),
+        "invalidated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="revoke_verifier_confirmations")
+async def revoke_verifier_confirmations(
+    user_id: str,
+    verifier_ids: List[str],
+) -> Dict[str, Any]:
+    """
+    Revoke verifier confirmations (compensation for saga).
+    
+    Args:
+        user_id: UUID of user whose confirmations to revoke
+        verifier_ids: List of verifier IDs whose confirmations to revoke
+        
+    Returns:
+        Dictionary with revocation status
+    """
+    activity.logger.info(
+        f"Revoking confirmations from {len(verifier_ids)} verifiers for user {user_id}"
+    )
+    
+    # TODO: Implement database update
+    # async with AsyncSessionLocal() as db:
+    #     revoked_count = 0
+    #     for verifier_id in verifier_ids:
+    #         result = await db.execute(
+    #             update(VerificationEvent)
+    #             .where(
+    #                 VerificationEvent.user_id == UUID(user_id),
+    #                 VerificationEvent.verifier_id == UUID(verifier_id)
+    #             )
+    #             .values(revoked=True, revoked_at=datetime.now(timezone.utc))
+    #         )
+    #         revoked_count += result.rowcount
+    #     await db.commit()
+    
+    return {
+        "revoked": True,
+        "count": len(verifier_ids),
+        "revoked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="send_level_change_notification")
+async def send_level_change_notification(
+    user_id: str,
+    old_level: str,
+    new_level: str,
+    trust_score: int,
+) -> Dict[str, Any]:
+    """
+    Send notification when user's verification level changes.
+    
+    Args:
+        user_id: UUID of user
+        old_level: Previous verification level
+        new_level: New verification level
+        trust_score: Current trust score
+        
+    Returns:
+        Dictionary with notification status
+    """
+    activity.logger.info(
+        f"Sending level change notification to {user_id}: {old_level} → {new_level}"
+    )
+    
+    # TODO: Implement actual notification
+    # await send_notification(
+    #     user_id=user_id,
+    #     type="verification_level_changed",
+    #     data={
+    #         "old_level": old_level,
+    #         "new_level": new_level,
+    #         "trust_score": trust_score,
+    #     },
+    #     channels=["in_app", "email", "push"]
+    # )
+    
+    return {
+        "sent": True,
+        "user_id": user_id,
+        "old_level": old_level,
+        "new_level": new_level,
+        "trust_score": trust_score,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="send_verification_email")
+async def send_verification_email(
+    user_id: str,
+    email: str,
+    verification_code: str,
+) -> Dict[str, Any]:
+    """
+    Send email verification code to user.
+    
+    Args:
+        user_id: UUID of user
+        email: Email address to send to
+        verification_code: 6-digit verification code
+        
+    Returns:
+        Dictionary with send status
+    """
+    activity.logger.info(f"Sending email verification code to {email}")
+    
+    # TODO: Implement actual email sending
+    # await send_email(
+    #     to=email,
+    #     subject="Verify your email - Nābr",
+    #     template="email_verification",
+    #     data={"code": verification_code, "user_id": user_id}
+    # )
+    
+    return {
+        "sent": True,
+        "email": email,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="send_verification_sms")
+async def send_verification_sms(
+    user_id: str,
+    phone: str,
+    verification_code: str,
+) -> Dict[str, Any]:
+    """
+    Send SMS verification code to user.
+    
+    Args:
+        user_id: UUID of user
+        phone: Phone number to send to (E.164 format)
+        verification_code: 6-digit verification code
+        
+    Returns:
+        Dictionary with send status
+    """
+    activity.logger.info(f"Sending SMS verification code to {phone}")
+    
+    # TODO: Implement actual SMS sending (Twilio, etc.)
+    # await send_sms(
+    #     to=phone,
+    #     message=f"Your Nābr verification code is: {verification_code}"
+    # )
+    
+    return {
+        "sent": True,
+        "phone": phone,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="validate_id_document")
+async def validate_id_document(
+    document_url: str,
+    document_type: str,
+) -> Dict[str, Any]:
+    """
+    Validate government ID document upload.
+    
+    Checks:
+    - File format is valid (JPG, PNG, PDF)
+    - File size is reasonable
+    - Document is readable
+    - Basic fraud detection (not a screenshot of a screenshot)
+    
+    Args:
+        document_url: URL to uploaded document
+        document_type: Type of ID (passport, drivers_license, etc.)
+        
+    Returns:
+        Dictionary with validation result
+    """
+    activity.logger.info(f"Validating {document_type} document at {document_url[:50]}...")
+    
+    # TODO: Implement actual validation
+    # - Download file
+    # - Check format
+    # - Run fraud detection
+    # - Extract text for verification
+    
+    # Placeholder
+    return {
+        "valid": True,
+        "document_type": document_type,
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="queue_for_human_review")
+async def queue_for_human_review(
+    user_id: str,
+    method: str,
+    review_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Queue verification method for human review.
+    
+    Args:
+        user_id: UUID of user
+        method: Verification method requiring review
+        review_data: Data for reviewer (document URLs, etc.)
+        
+    Returns:
+        Dictionary with queue status
+    """
+    activity.logger.info(f"Queuing {method} for human review (user {user_id})")
+    
+    # TODO: Implement review queue
+    # async with AsyncSessionLocal() as db:
+    #     review = ReviewQueue(
+    #         user_id=UUID(user_id),
+    #         method=method,
+    #         data=review_data,
+    #         queued_at=datetime.now(timezone.utc),
+    #         status="pending",
+    #     )
+    #     db.add(review)
+    #     await db.commit()
+    #     
+    #     # Notify reviewers
+    #     await notify_reviewers(method_type=method)
+    
+    return {
+        "queued": True,
+        "user_id": user_id,
+        "method": method,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "estimated_review_time_hours": 48,
     }
