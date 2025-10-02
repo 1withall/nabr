@@ -1091,3 +1091,381 @@ async def queue_for_human_review(
         "queued_at": datetime.now(timezone.utc).isoformat(),
         "estimated_review_time_hours": 48,
     }
+
+
+# ============================================================================
+# Progressive Trust Scoring Activities
+# ============================================================================
+
+@activity.defn(name="calculate_trust_score_activity")
+async def calculate_trust_score_activity(
+    completed_methods: Dict[str, int],
+    user_type: str,
+) -> int:
+    """
+    Calculate total trust score from completed verification methods.
+    
+    Args:
+        completed_methods: Dict mapping method name to completion count
+        user_type: Type of user account (INDIVIDUAL, BUSINESS, ORGANIZATION)
+        
+    Returns:
+        Total trust score (points)
+    """
+    activity.logger.info(f"Calculating trust score for {user_type} with {len(completed_methods)} methods")
+    
+    # Convert method names to enum
+    method_dict = {}
+    for method_name, count in completed_methods.items():
+        try:
+            method = VerificationMethod(method_name)
+            method_dict[method] = count
+        except ValueError:
+            activity.logger.warning(f"Unknown verification method: {method_name}")
+            continue
+    
+    # Convert user type
+    try:
+        user_type_enum = UserType(user_type.lower())
+    except ValueError:
+        activity.logger.error(f"Invalid user type: {user_type}")
+        return 0
+    
+    # Calculate score using verification_types function
+    score = calculate_trust_score(method_dict, user_type_enum)
+    
+    activity.logger.info(f"Calculated trust score: {score} points")
+    return score
+
+
+@activity.defn(name="award_verification_points")
+async def award_verification_points(
+    user_id: str,
+    method: str,
+    points: int,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Award points for completing a verification method and update level.
+    
+    This is the CORE activity for progressive trust accumulation.
+    
+    Args:
+        user_id: UUID of user
+        method: Verification method completed
+        points: Points to award
+        metadata: Additional data about the verification
+        
+    Returns:
+        Dictionary with updated trust score and level
+    """
+    activity.logger.info(f"Awarding {points} points to user {user_id} for {method}")
+    
+    async with AsyncSessionLocal() as db:
+        # Get or create user verification level record
+        level_result = await db.execute(
+            select(UserVerificationLevel).where(
+                UserVerificationLevel.user_id == UUID(user_id)
+            )
+        )
+        level_record = level_result.scalar_one_or_none()
+        
+        if not level_record:
+            # Create new level record
+            level_record = UserVerificationLevel(
+                user_id=UUID(user_id),
+                current_level=VerificationLevel.UNVERIFIED,
+                completed_methods=[],
+                in_progress_methods=[],
+                total_methods_completed=0,
+            )
+            db.add(level_record)
+            await db.flush()
+        
+        old_level = level_record.current_level
+        
+        # Add method to completed_methods if not already there
+        completed_list = level_record.completed_methods or []
+        if method not in completed_list:
+            completed_list.append(method)
+            level_record.completed_methods = completed_list
+            level_record.total_methods_completed = len(completed_list)
+        
+        # Calculate new trust score
+        # Build method count dict
+        method_counts = {}
+        for m in completed_list:
+            method_counts[m] = method_counts.get(m, 0) + 1
+        
+        # Get user type
+        user = await db.get(User, UUID(user_id))
+        if not user:
+            activity.logger.error(f"User {user_id} not found")
+            return {"error": "User not found"}
+        
+        user_type = user.user_type
+        
+        # Calculate trust score
+        method_enum_dict = {}
+        for method_name, count in method_counts.items():
+            try:
+                method_enum = VerificationMethod(method_name)
+                method_enum_dict[method_enum] = count
+            except ValueError:
+                continue
+        
+        trust_score = calculate_trust_score(method_enum_dict, user_type)
+        
+        # Calculate new level
+        new_level = calc_level_from_score(trust_score)
+        
+        # Update level record
+        level_record.current_level = new_level
+        if new_level != old_level:
+            level_record.level_achieved_at = datetime.now(timezone.utc)
+        
+        # Calculate progress to next level
+        level_thresholds = {
+            VerificationLevel.MINIMAL: 100,
+            VerificationLevel.STANDARD: 250,
+            VerificationLevel.ENHANCED: 400,
+            VerificationLevel.COMPLETE: 600,
+        }
+        
+        current_threshold = level_thresholds.get(new_level, 0)
+        next_threshold = None
+        for level in [VerificationLevel.MINIMAL, VerificationLevel.STANDARD, 
+                      VerificationLevel.ENHANCED, VerificationLevel.COMPLETE]:
+            if level_thresholds[level] > trust_score:
+                next_threshold = level_thresholds[level]
+                break
+        
+        if next_threshold:
+            progress = ((trust_score - current_threshold) / 
+                       (next_threshold - current_threshold)) * 100
+            level_record.level_progress_percentage = min(100.0, max(0.0, progress))
+        else:
+            level_record.level_progress_percentage = 100.0
+        
+        await db.commit()
+        
+        # Record event
+        await record_verification_event(
+            user_id=user_id,
+            event_type="points_awarded",
+            method=method,
+            data={
+                "points": points,
+                "method": method,
+                "trust_score": trust_score,
+                "old_level": old_level.value,
+                "new_level": new_level.value,
+                "metadata": metadata or {},
+            },
+        )
+        
+        # Send notification if level changed
+        if new_level != old_level:
+            await send_level_change_notification(
+                user_id=user_id,
+                old_level=old_level.value,
+                new_level=new_level.value,
+                score=trust_score,
+            )
+        
+        activity.logger.info(
+            f"Awarded {points} points. Trust score: {trust_score}, "
+            f"Level: {old_level.value} → {new_level.value}"
+        )
+        
+        return {
+            "user_id": user_id,
+            "points_awarded": points,
+            "trust_score": trust_score,
+            "old_level": old_level.value,
+            "new_level": new_level.value,
+            "level_changed": new_level != old_level,
+            "progress_to_next": level_record.level_progress_percentage,
+        }
+
+
+@activity.defn(name="record_verification_event")
+async def record_verification_event(
+    user_id: str,
+    event_type: str,
+    method: Optional[str] = None,
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Record a verification event in the immutable audit trail.
+    
+    Args:
+        user_id: UUID of user
+        event_type: Type of event (e.g., "points_awarded", "method_completed")
+        method: Verification method (if applicable)
+        data: Additional structured event data
+        
+    Returns:
+        Dictionary with event ID and timestamp
+    """
+    activity.logger.info(f"Recording event: {event_type} for user {user_id}")
+    
+    async with AsyncSessionLocal() as db:
+        event = VerificationEvent(
+            user_id=UUID(user_id),
+            event_type=event_type,
+            event_data={
+                "method": method,
+                **(data or {}),
+            },
+            temporal_workflow_id=activity.info().workflow_id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(event)
+        await db.commit()
+        
+        activity.logger.info(f"Recorded event {event.id} of type {event_type}")
+        
+        return {
+            "event_id": str(event.id),
+            "event_type": event_type,
+            "created_at": event.created_at.isoformat(),
+        }
+
+
+@activity.defn(name="send_level_change_notification")
+async def send_level_change_notification(
+    user_id: str,
+    old_level: str,
+    new_level: str,
+    score: int,
+) -> Dict[str, Any]:
+    """
+    Send notification when user's verification level increases.
+    
+    Args:
+        user_id: UUID of user
+        old_level: Previous verification level
+        new_level: New verification level
+        score: Current trust score
+        
+    Returns:
+        Dictionary with notification status
+    """
+    activity.logger.info(
+        f"Sending level change notification: {old_level} → {new_level} "
+        f"(score: {score})"
+    )
+    
+    # TODO: Implement actual notification sending
+    # - Email notification
+    # - In-app notification
+    # - Push notification (if mobile app exists)
+    
+    return {
+        "sent": True,
+        "user_id": user_id,
+        "old_level": old_level,
+        "new_level": new_level,
+        "score": score,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="invalidate_qr_codes")
+async def invalidate_qr_codes(
+    qr_codes: List[str],
+) -> Dict[str, Any]:
+    """
+    Invalidate QR codes (saga compensation function).
+    
+    Called when a two-party verification fails or is cancelled.
+    
+    Args:
+        qr_codes: List of QR code tokens to invalidate
+        
+    Returns:
+        Dictionary with invalidation status
+    """
+    activity.logger.info(f"Invalidating {len(qr_codes)} QR codes")
+    
+    async with AsyncSessionLocal() as db:
+        for token in qr_codes:
+            # Find verification record by token
+            result = await db.execute(
+                select(VerificationRecord).where(
+                    (VerificationRecord.verifier1_token == token) |
+                    (VerificationRecord.verifier2_token == token)
+                )
+            )
+            verification = result.scalar_one_or_none()
+            
+            if verification:
+                verification.status = VerificationStatus.EXPIRED
+                verification.qr_expires_at = datetime.now(timezone.utc)
+                activity.logger.info(f"Invalidated QR code for verification {verification.id}")
+        
+        await db.commit()
+    
+    return {
+        "invalidated": True,
+        "count": len(qr_codes),
+        "invalidated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@activity.defn(name="revoke_confirmations")
+async def revoke_confirmations(
+    user_id: str,
+    verifier_ids: List[str],
+) -> Dict[str, Any]:
+    """
+    Revoke verifier confirmations (saga compensation function).
+    
+    Called when a two-party verification is rolled back.
+    
+    Args:
+        user_id: UUID of user whose verifications should be revoked
+        verifier_ids: List of verifier UUIDs whose confirmations should be revoked
+        
+    Returns:
+        Dictionary with revocation status
+    """
+    activity.logger.info(f"Revoking confirmations from {len(verifier_ids)} verifiers for user {user_id}")
+    
+    async with AsyncSessionLocal() as db:
+        # Find all verification records for this user with these verifiers
+        result = await db.execute(
+            select(VerificationRecord).where(
+                (VerificationRecord.user_id == UUID(user_id)) &
+                (
+                    (VerificationRecord.verifier1_id.in_([UUID(v) for v in verifier_ids])) |
+                    (VerificationRecord.verifier2_id.in_([UUID(v) for v in verifier_ids]))
+                )
+            )
+        )
+        verifications = result.scalars().all()
+        
+        for verification in verifications:
+            verification.status = VerificationStatus.REVOKED
+            activity.logger.info(f"Revoked verification {verification.id}")
+        
+        await db.commit()
+        
+        # Record event
+        await record_verification_event(
+            user_id=user_id,
+            event_type="confirmations_revoked",
+            data={
+                "verifier_ids": verifier_ids,
+                "count": len(verifications),
+            },
+        )
+    
+    return {
+        "revoked": True,
+        "user_id": user_id,
+        "verifier_count": len(verifier_ids),
+        "verification_count": len(verifications),
+        "revoked_at": datetime.now(timezone.utc).isoformat(),
+    }
