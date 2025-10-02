@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [2025-10-01] - Phase 2C: Verification Activities & Tiered Verification System ✅
 
+#### Added - Database Models for Tiered Verification
+- **6 New Database Tables** in `src/nabr/models/verification.py`:
+  - **VerificationRecord**: Individual verification attempt records
+    - Tracks each verification method attempt (two-party, ID, notary, etc.)
+    - Stores verifier confirmations and timestamps
+    - QR token storage with expiration
+    - Document hashes and credential numbers
+    - Status tracking (pending, in_progress, verified, rejected, expired, revoked)
+    - Location data for in-person verifications
+    - Temporal workflow integration
+  - **UserVerificationLevel**: User's current verification level and progress
+    - Current level (UNVERIFIED → COMPLETE)
+    - Lists of completed and in-progress methods
+    - Progress percentage to next level
+    - Statistics tracking
+  - **VerifierProfile**: Verifier authorization and credentials
+    - Authorization status (authorized/revoked)
+    - Credential list (notary, attorney, etc.)
+    - Verification statistics and rating
+    - Revocation tracking with reason
+    - Training completion status
+  - **VerifierCredentialValidation**: Credential validation records
+    - Credential type and validation status
+    - Validation method and source
+    - Issuing authority
+    - Expiration dates
+    - Last checked timestamps
+  - **VerificationMethodCompletion**: Audit trail of completed methods
+    - One record per user per method
+    - Tracks level before and after
+    - References verification record
+    - Unique constraint on (user_id, method)
+  - **VerificationEvent**: Immutable event audit trail
+    - All verification-related events
+    - Actor tracking
+    - IP address and user agent
+    - Temporal workflow references
+    - Structured event data (JSONB)
+
+- **Alembic Migration** `8a7f3c9d4e21_add_tiered_verification_models.py`:
+  - Creates all 6 verification tables
+  - Adds 3 new enum types: VerificationMethod, VerificationLevel, VerifierCredential
+  - Comprehensive indexes for performance
+  - Foreign key constraints with proper cascade behavior
+  - Unique constraints for data integrity
+  - Complete downgrade path
+
+- **Updated User Model** relationships:
+  - `verification_records` - All verification attempts
+  - `verification_level` - Current level tracker
+  - `verifier_profile` - Verifier authorization
+  - `method_completions` - Completed methods audit
+  - Legacy `verifications_received` maintained for backward compatibility
+
 #### Added - Tiered Verification System
 - **Multi-Level Verification Framework** in `src/nabr/models/verification_types.py`:
   - **6 Verification Levels**: UNVERIFIED → MINIMAL → BASIC → STANDARD → ENHANCED → COMPLETE

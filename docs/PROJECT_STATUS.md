@@ -68,19 +68,25 @@ The Nābr MVP foundation has been successfully established with a complete, prod
 
 ## 🚧 In Progress / Next Steps
 
-### Phase 2C: Verification System - Database Models (Current Priority)
+### Phase 2C: Verification System - Integration (Current Priority)
 - [x] Design tiered verification system (6 levels)
 - [x] Create verification type enums and requirements
 - [x] Implement 9 verification activities
 - [x] Add QR code generation capability
-- [ ] Create verification database models:
-  - [ ] Verification model (updated for tiered system)
-  - [ ] VerificationMethod completion tracking
-  - [ ] VerifierProfile model with credentials
-  - [ ] VerifierCredential validation records
-  - [ ] QR token storage and expiration
-- [ ] Integrate activities with database
-- [ ] Update VerificationWorkflow
+- [x] Create verification database models:
+  - [x] VerificationRecord model (replaces Verification)
+  - [x] UserVerificationLevel for tracking progress
+  - [x] VerifierProfile with credentials
+  - [x] VerifierCredentialValidation records
+  - [x] VerificationMethodCompletion audit trail
+  - [x] VerificationEvent immutable log
+  - [x] Alembic migration (8a7f3c9d4e21)
+- [ ] Integrate activities with database:
+  - [ ] Uncomment database code in activities
+  - [ ] Test QR code generation end-to-end
+  - [ ] Test verifier authorization logic
+  - [ ] Test level calculation with real data
+- [ ] Update VerificationWorkflow to use new models
 - [ ] Test end-to-end verification flow
 
 ### Phase 2D: Matching & Review Activities (Next)

@@ -110,12 +110,39 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    # Legacy verification relationship (will be deprecated)
     verifications_received = relationship(
         "Verification",
         foreign_keys="[Verification.user_id]",
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    
+    # New tiered verification relationships
+    verification_records = relationship(
+        "VerificationRecord",
+        foreign_keys="[VerificationRecord.user_id]",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    verification_level = relationship(
+        "UserVerificationLevel",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    verifier_profile = relationship(
+        "VerifierProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    method_completions = relationship(
+        "VerificationMethodCompletion",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    
     requests_created = relationship(
         "Request",
         foreign_keys="[Request.requester_id]",
