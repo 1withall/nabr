@@ -2,10 +2,11 @@
 Verification-related schemas.
 
 Defines all schemas for user verification, QR codes, and verification workflows.
+Includes schemas for progressive trust system (Phase 2C Extended).
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List, Any
 from uuid import UUID
 from pydantic import Field, ConfigDict
 
@@ -183,3 +184,52 @@ class VerifierConfirmation(BaseSchema):
             }
         }
     )
+
+
+# ============================================================================
+# Progressive Trust System Schemas (Phase 2C Extended)
+# ============================================================================
+
+class VerificationMethodStart(BaseSchema):
+    """Schema for starting a verification method."""
+    
+    method: str = Field(..., description="Verification method to start")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Method-specific parameters")
+
+
+class VerificationStatus(BaseSchema):
+    """Schema for current verification status."""
+    
+    user_id: str
+    trust_score: int
+    verification_level: str
+    completed_methods: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    active_verifications: List[str] = Field(default_factory=list)
+
+
+class NextLevelInfo(BaseSchema):
+    """Schema for next verification level information."""
+    
+    current_score: int
+    current_level: str
+    next_level: Optional[str] = None
+    points_needed: int
+    suggested_paths: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class VerifierConfirmationRequest(BaseSchema):
+    """Schema for verifier confirmation of identity."""
+    
+    user_id: str
+    method: str
+    qr_code: str
+    location_lat: Optional[float] = None
+    location_lon: Optional[float] = None
+    device_fingerprint: Optional[str] = None
+
+
+class VerificationRevocation(BaseSchema):
+    """Schema for revoking a verification method."""
+    
+    method: str
+    reason: str
