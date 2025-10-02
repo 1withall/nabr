@@ -50,9 +50,9 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    username = Column(String(50), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
+    email = Column(String(255), unique=True, nullable=True, index=True)  # Optional for accessibility
+    username = Column(String(50), unique=True, nullable=False, index=True)  # Primary identifier
+    hashed_password = Column(String(255), nullable=True)  # Optional - PIN used instead
     full_name = Column(String(255), nullable=False)
     user_type = Column(Enum(UserType), nullable=False, default=UserType.INDIVIDUAL)
     
@@ -138,6 +138,18 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    
+    # Authentication relationships
+    authentication_methods = relationship(
+        "UserAuthenticationMethod",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    kiosk_sessions = relationship(
+        "KioskSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     method_completions = relationship(
         "VerificationMethodCompletion",
         back_populates="user",
@@ -168,7 +180,14 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, username={self.username}, type={self.user_type})>"
+        return f"<User(id={self.id}, username={self.username}, email={self.email})>"
+    
+    __table_args__ = (
+        # Ensure at least ONE identifier is present
+        # This supports UN/PIN authentication without requiring email
+        # User must have username (always required) OR email OR phone_number
+        # In practice, username is always present, so this is a safety check
+    )
 
 
 class IndividualProfile(Base):

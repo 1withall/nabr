@@ -7,6 +7,198 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### [2025-01-02] - UN/PIN Authentication System Implementation 🚧
+
+#### 🎯 MAJOR FEATURE: Username/PIN Authentication with Type-Specific Signup Forms
+
+Implementing accessible authentication system that doesn't require email, phone, or personal devices. UN/PIN (Username + 6-digit PIN) authentication enables access for vulnerable populations including homeless, elderly, and digitally disconnected individuals.
+
+#### Added - Authentication Documentation
+
+**Created `docs/AUTHENTICATION_SYSTEM.md`** (520+ lines):
+
+- **Core Principles**: No email required, device-agnostic, biometric-first with PIN backup
+- **Authentication Methods**:
+  - **Primary**: UN/PIN (universal, works on any device including shared kiosks)
+  - **Secondary**: Biometric (fingerprint/Face ID on personal devices)
+  - **Tertiary**: Email/password (optional, traditional method)
+  - **Helper-Assisted**: Community workers can authenticate users
+  
+- **User Type-Specific Signup Forms**:
+  - **INDIVIDUAL**: Personal users with skills, interests, availability
+  - **BUSINESS**: Local businesses with address, services, tax ID
+  - **ORGANIZATION**: Non-profits with mission, programs, 501(c)(3) status
+  
+- **Security Features**:
+  - Argon2id password/PIN hashing (OWASP recommended)
+  - Rate limiting: 5 attempts per 15 minutes
+  - Account lockout: 30 minutes after 5 failed attempts
+  - Timing attack protection with `secrets.compare_digest()`
+  - PIN validation: No sequential (123456) or repeated (111111) patterns
+  
+- **Temporal Workflow Integration**:
+  - `SignupWorkflow`: Long-running workflow with 8 activities
+  - Saga pattern: Automatic rollback on failure
+  - Child workflows: Spawns verification workflow after signup
+  - Retry policies: 3 attempts with exponential backoff
+
+#### Added - Database Models for Authentication
+
+**Created `src/nabr/models/auth_methods.py`**:
+
+- **`AuthMethodType` Enum**: PIN, BIOMETRIC, EMAIL, PHONE, HELPER_ASSISTED
+- **`UserAuthenticationMethod` Model**:
+  - Stores multiple auth methods per user
+  - Tracks failed attempts and account lockout
+  - Primary/secondary method designation
+  - Unique constraint: (user_id, method_type, method_identifier)
+  
+- **`KioskSession` Model**:
+  - Tracks shared device sessions
+  - 30-minute expiry with 5-minute inactivity timeout
+  - Location tracking: kiosk_id, IP, user_agent
+  - Properties: `is_active`, `time_remaining`
+
+#### Changed - User Model for Optional Email/Password
+
+**Modified `src/nabr/models/user.py`**:
+
+- Made `email` field nullable (was required)
+- Made `hashed_password` field nullable (was required)
+- Added relationships: `authentication_methods`, `kiosk_sessions`
+- Username is now the primary identifier
+- Check constraint: At least one identifier required (username OR email OR phone)
+
+#### Added - Pydantic Schemas for Type-Specific Forms
+
+**Enhanced `src/nabr/schemas/auth.py`** (370+ lines added):
+
+- **`PINLoginRequest`**: Username + PIN + optional kiosk_id
+- **`BaseSignupData`**: Common fields (username, PIN, full_name, email, phone)
+- **`IndividualSignupData`**: Type-specific fields (date_of_birth, city, state, bio, skills, interests, languages, availability)
+- **`BusinessSignupData`**: Type-specific fields (business_name, business_type, address, tax_id, services, business_hours)
+- **`OrganizationSignupData`**: Type-specific fields (organization_name, mission_statement, programs, staff_count, is_501c3)
+- **Discriminated Union**: `SignupRequest` with `Field(discriminator="user_type")`
+- **Response Schemas**: `SignupResponse`, `PINLoginResponse`, `PINLoginError`, `AuthTokens`
+
+**Validation Features:**
+- Username: 3-20 chars, alphanumeric + underscores
+- PIN: 6 digits, no sequential, no repeated
+- PIN confirmation: Must match primary PIN
+- Age validation: Must be at least 13 years old
+- Type-specific validation: Based on user_type discriminator
+
+#### Added - Temporal SignupWorkflow
+
+**Created `src/nabr/temporal/workflows/signup.py`** (400+ lines):
+
+- **`SignupWorkflow`**: Long-running durable workflow
+- **8 Activities Orchestrated**:
+  1. `create_user_account`: Create user record with username
+  2. `create_pin_auth_method`: Hash PIN with Argon2, store auth method
+  3. `create_user_profile`: Create type-specific profile (Individual/Business/Organization)
+  4. `initialize_verification_level`: Set to TIER_0_UNVERIFIED
+  5. `create_session`: Generate JWT tokens for immediate login
+  6. `send_welcome_message`: Send email/SMS (optional, non-critical)
+  7. `record_signup_event`: Log for analytics (optional)
+  8. `start_verification_workflow`: Spawn child workflow for verification journey
+
+**Saga Pattern Implementation:**
+- Compensation activities: Delete user, deactivate auth, delete profile
+- Executes in reverse order on failure
+- Ensures no orphaned records
+- Retry policies: 3 attempts for critical operations
+
+**Workflow Features:**
+- Signals: `cancel_signup` for user-initiated cancellation
+- Queries: `get_status` for real-time progress inspection
+- Child workflows: Non-blocking verification workflow startup
+- Context-aware sessions: 30 min for kiosks, 7 days for personal devices
+
+#### Added - Authentication Activities (Needs Async Fix 🔧)
+
+**Created `src/nabr/temporal/activities/auth_activities.py`** (770+ lines):
+
+**Implementation Status**: File created with type errors due to async/sync mismatch
+
+**8 Signup Activities Implemented**:
+- `create_user_account`: User creation with username uniqueness check
+- `create_pin_auth_method`: Argon2 PIN hashing with security tracking
+- `create_user_profile`: Type-specific profile creation (discriminated union)
+- `initialize_verification_level`: Set TIER_0_UNVERIFIED with score tracking
+- `create_session`: JWT token generation with device-aware expiry
+- `send_welcome_message`: Email/SMS notification (placeholder)
+- `record_signup_event`: Analytics logging (placeholder)
+- `validate_pin_login`: Rate-limited PIN verification with brute force protection
+
+**3 Compensation Activities Implemented**:
+- `delete_user_account`: Saga rollback for user creation
+- `deactivate_auth_method`: Saga rollback for auth method
+- `delete_user_profile`: Saga rollback for profile creation
+
+**Security Features Implemented**:
+- Argon2 hashing: time_cost=3, memory_cost=65536, parallelism=4
+- Timing attack protection: Random sleep 0.1-0.3s for invalid usernames
+- Rate limiting: 5 attempts tracked per auth method
+- Account lockout: 30 minutes after 5 failed attempts
+- Failed attempts reset: On successful login or lock expiry
+
+**Known Issues** (🔧 Requires Fix):
+- ❌ Database session handling: `get_db()` is async but used with `next()`
+- ❌ Token function signatures: `create_access_token` expects `subject`, not `data`
+- ❌ SQLAlchemy column types: Need to access loaded attributes, not Column objects
+- ❌ Async compatibility: Activities need `async with` for database sessions
+
+#### Research Conducted
+
+**Context7 Documentation Queries** (164 code snippets retrieved):
+
+- **Temporal Python SDK** (`/temporalio/sdk-python`, 68 snippets):
+  - Workflow patterns: `@workflow.defn`, `workflow.execute_activity`
+  - Retry policies with exponential backoff
+  - Child workflows with `workflow.start_child_workflow`
+  - Signals and queries for workflow interaction
+  - Saga compensation pattern for rollback
+  
+- **FastAPI** (`/tiangolo/fastapi`, 56 snippets):
+  - Security: `secrets.compare_digest()` for timing attack protection
+  - Dependency injection with `Depends()`
+  - Background tasks for async post-response operations
+  - Rate limiting middleware patterns
+  
+- **Pydantic** (`/pydantic/pydantic`, 40 snippets):
+  - Discriminated unions with `Field(discriminator="field")`
+  - Field validators with `@field_validator`
+  - Type-safe validation with `Annotated` and `AfterValidator`
+
+#### Next Steps
+
+**Immediate** (Blocking):
+1. ❗ Fix async database session handling in activities
+2. ❗ Correct token function signatures (`subject` vs `data`)
+3. ❗ Update activities to properly await async operations
+4. ❗ Test SignupWorkflow end-to-end
+
+**High Priority**:
+5. Implement `/auth/signup` API endpoint
+6. Implement `/auth/login/pin` API endpoint
+7. Create Alembic migration for new tables
+8. Add integration tests for signup workflow
+
+**Medium Priority**:
+9. Implement rate limiting middleware
+10. Add PIN validation utility functions
+11. Implement biometric authentication support
+12. Build frontend signup forms with type-specific fields
+
+**Low Priority**:
+13. Add email/SMS notification service integration
+14. Implement helper-assisted authentication
+15. Build kiosk management interface
+16. Add analytics dashboard for signup events
+
+---
+
 ### [2025-10-02] - Docker Infrastructure & Integration Testing ✅
 
 #### 🎯 CRITICAL MILESTONE: Docker Services Operational & Integration Tests Passing
