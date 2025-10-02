@@ -15,8 +15,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from temporalio.client import Client as TemporalClient
+from temporalio.service import RPCError
 
 from nabr.api.dependencies.auth import get_current_user
+from nabr.api.dependencies.temporal import get_temporal_client
 from nabr.schemas.user import UserRead
 from nabr.schemas.verification import (
     VerificationMethodStart,
@@ -44,7 +46,7 @@ router = APIRouter(prefix="/verification", tags=["verification"])
 async def start_verification_method(
     request: VerificationMethodStart,
     current_user: UserRead = Depends(get_current_user),
-    temporal_client: TemporalClient = Depends(),  # TODO: Add temporal client dependency
+    temporal_client: TemporalClient = Depends(get_temporal_client),
 ) -> Dict[str, Any]:
     """
     Start a verification method for the current user.
@@ -84,26 +86,37 @@ async def start_verification_method(
     # Get parent workflow handle
     workflow_id = f"verification-{current_user.id}"
     
-    # TODO: Signal parent workflow to start verification method
-    # handle = temporal_client.get_workflow_handle(workflow_id)
-    # await handle.signal(
-    #     "start_verification_method",
-    #     method=request.method,
-    #     params=request.params
-    # )
-    
-    return {
-        "workflow_id": workflow_id,
-        "method": request.method,
-        "status": "started",
-        "message": f"Verification method {request.method} started successfully"
-    }
+    try:
+        # Signal parent workflow to start verification method
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        await handle.signal(
+            "start_verification_method",
+            method=request.method,
+            params=request.params or {}
+        )
+        
+        return {
+            "workflow_id": workflow_id,
+            "method": request.method,
+            "status": "started",
+            "message": f"Verification method {request.method} started successfully"
+        }
+        
+    except RPCError as e:
+        # Workflow doesn't exist - need to start parent workflow first
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Verification workflow not found for user. "
+                f"Parent workflow must be started first. Error: {str(e)}"
+            )
+        )
 
 
 @router.get("/status", response_model=VerificationStatus)
 async def get_verification_status(
     current_user: UserRead = Depends(get_current_user),
-    temporal_client: TemporalClient = Depends(),
+    temporal_client: TemporalClient = Depends(get_temporal_client),
 ) -> VerificationStatus:
     """
     Get current trust score, verification level, and completed methods.
@@ -119,35 +132,37 @@ async def get_verification_status(
     """
     workflow_id = f"verification-{current_user.id}"
     
-    # TODO: Query parent workflow for status
-    # handle = temporal_client.get_workflow_handle(workflow_id)
-    # 
-    # trust_score = await handle.query("get_trust_score")
-    # level = await handle.query("get_verification_level")
-    # completed = await handle.query("get_completed_methods")
-    # active = await handle.query("get_active_verifications")
-    
-    # Placeholder
-    return VerificationStatus(
-        user_id=str(current_user.id),
-        trust_score=150,
-        verification_level="minimal",
-        completed_methods={
-            "IN_PERSON_TWO_PARTY": {
-                "points": 150,
-                "completed_at": "2025-10-01T12:00:00Z",
-                "expires_at": None,
-                "is_expired": False,
-            }
-        },
-        active_verifications=[],
-    )
+    try:
+        # Query parent workflow for status
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        
+        trust_score = await handle.query("get_trust_score")
+        level = await handle.query("get_verification_level")
+        completed = await handle.query("get_completed_methods")
+        
+        return VerificationStatus(
+            user_id=str(current_user.id),
+            trust_score=trust_score,
+            verification_level=level,
+            completed_methods=completed,
+            active_verifications=[],
+        )
+        
+    except RPCError as e:
+        # Workflow doesn't exist yet - user hasn't started verification
+        return VerificationStatus(
+            user_id=str(current_user.id),
+            trust_score=0,
+            verification_level="unverified",
+            completed_methods={},
+            active_verifications=[],
+        )
 
 
 @router.get("/next-level", response_model=NextLevelInfo)
 async def get_next_level_requirements(
     current_user: UserRead = Depends(get_current_user),
-    temporal_client: TemporalClient = Depends(),
+    temporal_client: TemporalClient = Depends(get_temporal_client),
 ) -> NextLevelInfo:
     """
     Get points needed and suggested paths to reach next verification level.
@@ -164,29 +179,28 @@ async def get_next_level_requirements(
     """
     workflow_id = f"verification-{current_user.id}"
     
-    # TODO: Query parent workflow for next level info
-    # handle = temporal_client.get_workflow_handle(workflow_id)
-    # next_level_info = await handle.query("get_next_level_info")
-    
-    # Placeholder
-    return NextLevelInfo(
-        current_score=150,
-        current_level="minimal",
-        next_level="standard",
-        points_needed=100,
-        suggested_paths=[
-            {
-                "methods": ["EMAIL", "PHONE", "GOVERNMENT_ID"],
-                "total_points": 160,
-                "description": "Email (30) + Phone (30) + Government ID (100)"
-            },
-            {
-                "methods": ["BIOMETRIC", "PERSONAL_REFERENCE", "PERSONAL_REFERENCE", "PERSONAL_REFERENCE"],
-                "total_points": 230,
-                "description": "Biometric (80) + 3 Personal References (150)"
-            }
-        ]
-    )
+    try:
+        # Query parent workflow for next level info
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        next_level_info = await handle.query("get_next_level_info")
+        
+        return NextLevelInfo(
+            current_score=next_level_info.get("current_score", 0),
+            current_level=next_level_info.get("current_level", "unverified"),
+            next_level=next_level_info.get("next_level", "minimal"),
+            points_needed=next_level_info.get("points_needed", 100),
+            suggested_paths=next_level_info.get("suggested_paths", []),
+        )
+        
+    except RPCError as e:
+        # Workflow doesn't exist - return defaults
+        return NextLevelInfo(
+            current_score=0,
+            current_level="unverified",
+            next_level="minimal",
+            points_needed=100,
+            suggested_paths=[],
+        )
 
 
 # ============================================================================
@@ -197,7 +211,7 @@ async def get_next_level_requirements(
 async def verifier_confirm_identity(
     confirmation: VerifierConfirmationRequest,
     current_user: UserRead = Depends(get_current_user),
-    temporal_client: TemporalClient = Depends(),
+    temporal_client: TemporalClient = Depends(get_temporal_client),
 ) -> Dict[str, Any]:
     """
     Confirm a user's identity as a verifier (for two-party verification).
@@ -216,34 +230,41 @@ async def verifier_confirm_identity(
     # Get the user's verification workflow
     workflow_id = f"verification-{confirmation.user_id}"
     
-    # TODO: Signal the workflow with verifier confirmation
-    # handle = temporal_client.get_workflow_handle(workflow_id)
-    # await handle.signal(
-    #     "verifier_confirms_identity",
-    #     verifier_id=str(current_user.id),
-    #     method=confirmation.method,
-    #     confirmation_data={
-    #         "qr_code": confirmation.qr_code,
-    #         "location_lat": confirmation.location_lat,
-    #         "location_lon": confirmation.location_lon,
-    #         "device_fingerprint": confirmation.device_fingerprint,
-    #     }
-    # )
-    
-    return {
-        "confirmed": True,
-        "verifier_id": str(current_user.id),
-        "user_id": confirmation.user_id,
-        "method": confirmation.method,
-        "confirmed_at": "2025-10-01T12:00:00Z",
-    }
+    try:
+        # Signal the workflow with verifier confirmation
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        await handle.signal(
+            "verifier_confirms_identity",
+            confirmation.method,
+            {
+                "verifier_id": str(current_user.id),
+                "location_lat": confirmation.location_lat,
+                "location_lon": confirmation.location_lon,
+                "device_fingerprint": confirmation.device_fingerprint,
+                "notes": confirmation.notes,
+            }
+        )
+        
+        return {
+            "confirmed": True,
+            "verifier_id": str(current_user.id),
+            "user_id": confirmation.user_id,
+            "method": confirmation.method,
+            "message": "Identity confirmation recorded successfully",
+        }
+        
+    except RPCError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Verification workflow not found for user {confirmation.user_id}. Error: {str(e)}"
+        )
 
 
 @router.post("/revoke", response_model=Dict[str, Any])
 async def revoke_verification_method(
     revocation: VerificationRevocation,
     current_user: UserRead = Depends(get_current_user),
-    temporal_client: TemporalClient = Depends(),
+    temporal_client: TemporalClient = Depends(get_temporal_client),
 ) -> Dict[str, Any]:
     """
     Revoke a verification method (removes points, may lower level).
@@ -265,20 +286,27 @@ async def revoke_verification_method(
     """
     workflow_id = f"verification-{current_user.id}"
     
-    # TODO: Signal workflow to revoke method
-    # handle = temporal_client.get_workflow_handle(workflow_id)
-    # await handle.signal(
-    #     "revoke_verification",
-    #     method=revocation.method,
-    #     reason=revocation.reason
-    # )
-    
-    return {
-        "revoked": True,
-        "method": revocation.method,
-        "reason": revocation.reason,
-        "revoked_at": "2025-10-01T12:00:00Z",
-    }
+    try:
+        # Signal workflow to revoke method
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        await handle.signal(
+            "revoke_verification",
+            revocation.method,
+            revocation.reason
+        )
+        
+        return {
+            "revoked": True,
+            "method": revocation.method,
+            "reason": revocation.reason,
+            "message": f"Verification method {revocation.method} revoked successfully",
+        }
+        
+    except RPCError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Verification workflow not found. Error: {str(e)}"
+        )
 
 
 # ============================================================================
