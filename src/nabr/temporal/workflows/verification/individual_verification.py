@@ -31,6 +31,12 @@ with workflow.unsafe.imports_passed_through():
         get_applicable_methods,
         METHOD_SCORES,
     )
+    from nabr.temporal.workflows.verification.methods import (
+        EmailVerificationWorkflow,
+        PhoneVerificationWorkflow,
+        TwoPartyInPersonWorkflow,
+        GovernmentIDWorkflow,
+    )
 
 
 @dataclass
@@ -239,13 +245,80 @@ class IndividualVerificationWorkflow:
             # Track active verification
             self.state.active_verifications.append(child_workflow_id)
             
-            # TODO: Implement child workflow spawning based on method type
-            # This will be implemented in the next phase with actual child workflows
-            # For now, log the intent
-            workflow.logger.info(
-                f"Child workflow {child_workflow_id} would be started here",
-                extra={"method": method, "params": params}
-            )
+            # Map method to workflow class and spawn child
+            try:
+                if method_enum == VerificationMethod.EMAIL:
+                    result = await workflow.execute_child_workflow(
+                        EmailVerificationWorkflow.run,
+                        args=[self.state.user_id, params.get("email", "")],
+                        id=child_workflow_id,
+                        task_queue=workflow.info().task_queue,
+                    )
+                elif method_enum == VerificationMethod.PHONE:
+                    result = await workflow.execute_child_workflow(
+                        PhoneVerificationWorkflow.run,
+                        args=[self.state.user_id, params.get("phone", "")],
+                        id=child_workflow_id,
+                        task_queue=workflow.info().task_queue,
+                    )
+                elif method_enum == VerificationMethod.IN_PERSON_TWO_PARTY:
+                    result = await workflow.execute_child_workflow(
+                        TwoPartyInPersonWorkflow.run,
+                        args=[self.state.user_id],
+                        id=child_workflow_id,
+                        task_queue=workflow.info().task_queue,
+                    )
+                elif method_enum == VerificationMethod.GOVERNMENT_ID:
+                    result = await workflow.execute_child_workflow(
+                        GovernmentIDWorkflow.run,
+                        args=[
+                            self.state.user_id,
+                            params.get("document_url", ""),
+                            params.get("document_type", ""),
+                        ],
+                        id=child_workflow_id,
+                        task_queue=workflow.info().task_queue,
+                    )
+                else:
+                    workflow.logger.warning(
+                        f"No child workflow implementation for method {method}",
+                        extra={"user_id": self.state.user_id, "method": method}
+                    )
+                    return
+                
+                # Child workflow completed successfully - record completion
+                workflow.logger.info(
+                    f"Child workflow completed for method {method}",
+                    extra={
+                        "user_id": self.state.user_id,
+                        "method": method,
+                        "result": result
+                    }
+                )
+                
+                # Complete the method with points from child workflow
+                if result.get("completed"):
+                    await self._complete_method(
+                        method=method_enum,
+                        count=1,
+                        metadata={"child_workflow_id": child_workflow_id, **result}
+                    )
+                
+                # Remove from active verifications
+                self.state.active_verifications.remove(child_workflow_id)
+                
+            except Exception as e:
+                workflow.logger.error(
+                    f"Child workflow failed for method {method}",
+                    extra={
+                        "user_id": self.state.user_id,
+                        "method": method,
+                        "error": str(e)
+                    }
+                )
+                # Remove from active verifications on failure
+                if child_workflow_id in self.state.active_verifications:
+                    self.state.active_verifications.remove(child_workflow_id)
             
         except ValueError as e:
             workflow.logger.error(
