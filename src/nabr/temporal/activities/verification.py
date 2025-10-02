@@ -318,10 +318,25 @@ async def calculate_verification_level(
     """
     Calculate user's verification level based on completed methods.
     
-    Different user types have different requirements:
-    - Individual: Email → Phone → ID → Two-party
-    - Business: Email → Phone → License → Tax ID → Owner
-    - Organization: Email → Phone → 501(c)(3) → Tax ID → Director
+    UNIQUE REQUIREMENTS PER USER TYPE:
+    
+    INDIVIDUAL (per original spec):
+      - MINIMAL: Email + Phone + TWO-PARTY IN-PERSON (baseline to use platform)
+      - STANDARD: Minimal + Government ID
+      - ENHANCED: Standard + Personal references
+      - COMPLETE: All methods including notary verification
+    
+    BUSINESS:
+      - MINIMAL: Email + Phone + Business License + Tax ID (prove legitimacy)
+      - STANDARD: Minimal + Business Address + Owner Verification
+      - ENHANCED: Standard + Insurance + Notarized docs
+      - COMPLETE: All methods including professional licenses
+    
+    ORGANIZATION:
+      - MINIMAL: Email + Phone + 501(c)(3) Status + Tax ID (prove legitimacy)
+      - STANDARD: Minimal + Bylaws + Board Verification
+      - ENHANCED: Standard + Mission Alignment + Community Endorsement
+      - COMPLETE: All methods including notarized docs
     
     Args:
         user_id: UUID of user
