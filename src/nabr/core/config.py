@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     # Temporal
     temporal_host: str = Field(default="localhost:7233", validation_alias="TEMPORAL_HOST")
     temporal_namespace: str = Field(default="default", validation_alias="TEMPORAL_NAMESPACE")
+    
+    # Task Queues (deprecated single queue, now using dedicated queues)
     temporal_task_queue: str = Field(default="nabr-task-queue", validation_alias="TEMPORAL_TASK_QUEUE")
     
     # Verification

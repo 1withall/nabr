@@ -7,6 +7,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### [2025-10-01] - Phase 2B: Temporal Multi-Worker Architecture 🏗️
+
+#### Added - Temporal Workflow Infrastructure
+- **Multi-Queue Worker Architecture** (following official Temporal best practices):
+  - `verification-queue` - Two-party user verification workflows
+  - `matching-queue` - Request-to-acceptor matching algorithms  
+  - `review-queue` - Review submission and moderation
+  - `notification-queue` - Email/SMS/push notifications
+- **WorkerManager class** in `src/nabr/temporal/worker.py`:
+  - Manages multiple workers with dedicated task queues
+  - Shared ThreadPoolExecutor for sync activities (100 workers)
+  - Supports running all workers in one process OR separate processes
+  - Graceful shutdown handling with activity executor cleanup
+  - Can start specific workers: `python -m nabr.temporal.worker verification`
+- **SystemBootstrapWorkflow** - Temporal workflow for system initialization:
+  - Runs database migrations via Alembic
+  - Performs health checks on all services
+  - Validates database schema integrity
+  - Initializes default data if needed
+  - Validates system configuration
+  - Leverages Temporal's retry logic, error handling, and observability
+  - Full audit trail in Temporal UI (http://localhost:8080)
+- **Bootstrap Activities** in `src/nabr/temporal/activities/bootstrap.py`:
+  - `run_database_migrations` - Executes Alembic migrations with error handling
+  - `check_database_health` - PostgreSQL connectivity and health checks
+  - `validate_database_schema` - Confirms all tables and indexes exist
+  - `initialize_default_data` - Idempotent default data creation
+  - `validate_configuration` - System configuration validation
+  - `run_service_health_checks` - Tests all service connections
+- **Workflow Definitions** with dedicated task queues:
+  - `VerificationWorkflow` → verification-queue
+  - `RequestMatchingWorkflow` → matching-queue
+  - `ReviewWorkflow` → review-queue
+
+#### Added - System Management Scripts
+- **`scripts/startup.sh`** - Comprehensive system startup orchestration:
+  - Starts Temporal server (with SQLite persistence)
+  - Starts PostgreSQL database
+  - Runs bootstrap workflow via Temporal
+  - Starts FastAPI backend
+  - Starts Temporal workers (all or specific)
+  - Options: `--skip-db` (use existing DB), `--dev` (workers in foreground)
+  - Beautiful colored output with progress indicators
+  - Health checks and service status reporting
+- **`scripts/shutdown.sh`** - Graceful system shutdown:
+  - Stops workers first (allows in-progress tasks to complete)
+  - Stops backend, then Temporal, then PostgreSQL
+  - Option: `--force` for immediate shutdown
+  - Clean container removal
+- **`scripts/README.md`** - Comprehensive documentation:
+  - Boot sequence architecture diagram
+  - Why use Temporal for bootstrap (benefits)
+  - Usage examples and troubleshooting
+  - Development tips and monitoring guide
+
+#### Added - Bootstrap CLI
+- **`src/nabr/temporal/bootstrap.py`** - CLI to run bootstrap workflow:
+  - Connects to Temporal server
+  - Starts bootstrap worker
+  - Executes SystemBootstrapWorkflow
+  - Reports success/failure with detailed logging
+  - Usage: `python -m nabr.temporal.bootstrap`
+
+#### Changed - Worker Configuration
+- Updated `src/nabr/core/config.py`:
+  - Deprecated `temporal_task_queue` (single queue approach)
+  - Now using domain-specific queues (verification-queue, etc.)
+  - Maintained backward compatibility with old setting
+- **Docker Compose** setup:
+  - Worker container runs: `python -m nabr.temporal.worker`
+  - Starts all workers in one container by default
+  - Can be split into multiple containers for production scaling
+  - Restart policy: `unless-stopped`
+
+#### Architecture Benefits
+- **Scalability**: Each worker type can scale independently
+  - Run 5 matching workers, 2 verification workers, 1 review worker
+  - Deploy workers to different machines/containers
+- **Isolation**: Worker crash doesn't affect other workflow types
+- **Resource Allocation**: Different CPU/memory per worker type
+- **Observability**: Full workflow visibility in Temporal UI
+- **Reliability**: Automatic retries with exponential backoff
+- **Error Handling**: Activity-level error recovery
+- **Audit Trail**: Complete workflow history for debugging
+
+#### Technical Implementation
+- Used official Temporal Python SDK patterns:
+  - `Worker` with `activity_executor` (ThreadPoolExecutor)
+  - Shared client connection across all workers
+  - `async with worker:` context manager pattern
+  - Signal handling for graceful shutdown
+- Following Temporal best practices from official docs:
+  - Dedicated task queues per domain
+  - Single worker process for simplicity (can split later)
+  - Proper activity retry policies
+  - Workflow determinism with `unsafe.imports_passed_through`
+- Bootstrap workflow provides:
+  - Automatic retries for transient failures
+  - Full observability in Temporal UI
+  - Workflow history and audit trail
+  - Activity-level logging and tracing
+
+#### Scripts Made Executable
+- `chmod +x scripts/startup.sh`
+- `chmod +x scripts/shutdown.sh`
+
+#### Notes
+- All workers run as background processes in Docker
+- Development mode available: `./scripts/startup.sh --dev`
+- Bootstrap workflow visible in Temporal UI with ID: `system-bootstrap`
+- Workers log to: `docker compose logs -f worker`
+- Bootstrap workflow logs to: `logs/bootstrap.log`
+
+---
+
 ### [2025-10-01] - Major Restructure: 3 User Types with Unique Workflows 🔄
 
 #### Breaking Changes
