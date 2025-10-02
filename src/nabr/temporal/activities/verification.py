@@ -23,17 +23,29 @@ from uuid import UUID
 
 import qrcode
 from temporalio import activity
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-# Will be imported when database integration is complete
-# from nabr.db.session import AsyncSessionLocal
-# from nabr.models.user import User, Verification, VerificationStatus
-# from nabr.models.verification_types import (
-#     VerificationLevel,
-#     VerificationMethod,
-#     VerifierCredential,
-#     VERIFIER_MINIMUM_LEVEL,
-#     AUTO_VERIFIER_CREDENTIALS,
-# )
+# Database imports
+from nabr.db.session import AsyncSessionLocal
+from nabr.models.user import User, UserType
+from nabr.models.verification import (
+    VerificationRecord,
+    VerificationStatus,
+    UserVerificationLevel,
+    VerifierProfile,
+    VerifierCredentialValidation,
+    VerificationMethodCompletion,
+    VerificationEvent,
+)
+from nabr.models.verification_types import (
+    VerificationLevel,
+    VerificationMethod,
+    VerifierCredential,
+    calculate_trust_score,
+    calculate_verification_level as calc_level_from_score,
+    METHOD_SCORES,
+)
 
 
 # ============================================================================
@@ -110,13 +122,18 @@ async def generate_verification_qr_codes(
     
     activity.logger.info(f"Generated QR codes for user {user_name}")
     
-    # TODO: Store tokens in database for validation
-    # async with AsyncSessionLocal() as db:
-    #     verification = await db.get(Verification, UUID(verification_id))
-    #     verification.verifier1_token = token_1
-    #     verification.verifier2_token = token_2
-    #     verification.qr_expires_at = expires_at
-    #     await db.commit()
+    # Store tokens in database for validation
+    async with AsyncSessionLocal() as db:
+        verification = await db.get(VerificationRecord, UUID(verification_id))
+        if verification:
+            verification.verifier1_token = token_1
+            verification.verifier2_token = token_2
+            verification.qr_expires_at = expires_at
+            verification.status = VerificationStatus.PENDING
+            await db.commit()
+            activity.logger.info(f"Stored QR tokens in database for verification {verification_id}")
+        else:
+            activity.logger.warning(f"Verification record {verification_id} not found")
     
     return {
         "qr_code_1": qr_code_1,
@@ -156,60 +173,109 @@ async def check_verifier_authorization(
     """
     activity.logger.info(f"Checking verifier authorization for {verifier_id}")
     
-    # TODO: Implement database query
-    # async with AsyncSessionLocal() as db:
-    #     verifier = await db.get(User, UUID(verifier_id))
-    #     
-    #     # Check verification level
-    #     if verifier.verification_level < VerificationLevel.STANDARD:
-    #         return {
-    #             "authorized": False,
-    #             "reason": "Verifier must be at STANDARD verification level or higher",
-    #         }
-    #     
-    #     # Check for credentials
-    #     verifier_profile = await db.get(VerifierProfile, UUID(verifier_id))
-    #     if not verifier_profile:
-    #         return {
-    #             "authorized": False,
-    #             "reason": "No verifier profile found",
-    #         }
-    #     
-    #     # Check if revoked
-    #     if verifier_profile.revoked:
-    #         return {
-    #             "authorized": False,
-    #             "reason": "Verifier status has been revoked",
-    #             "revoked_at": verifier_profile.revoked_at,
-    #             "revocation_reason": verifier_profile.revocation_reason,
-    #         }
-    #     
-    #     # Check credentials
-    #     credentials = verifier_profile.credentials
-    #     auto_qualified = any(cred in AUTO_VERIFIER_CREDENTIALS for cred in credentials)
-    #     
-    #     if auto_qualified:
-    #         return {
-    #             "authorized": True,
-    #             "credentials": credentials,
-    #             "auto_qualified": True,
-    #         }
-    #     
-    #     # Check verification count for TRUSTED_VERIFIER status
-    #     if verifier.total_verifications_performed >= 50:
-    #         return {
-    #             "authorized": True,
-    #             "credentials": [VerifierCredential.TRUSTED_VERIFIER],
-    #             "verification_count": verifier.total_verifications_performed,
-    #         }
-    
-    # Placeholder response
-    return {
-        "authorized": True,  # TODO: Replace with actual logic
-        "credentials": ["trusted_verifier"],
-        "verification_level": "standard",
-        "verifications_performed": 25,
+    # Auto-qualified credentials (notary, attorney, etc.)
+    AUTO_VERIFIER_CREDENTIALS = {
+        VerifierCredential.NOTARY_PUBLIC,
+        VerifierCredential.ATTORNEY,
+        VerifierCredential.GOVERNMENT_OFFICIAL,
     }
+    
+    async with AsyncSessionLocal() as db:
+        # Get verifier user
+        verifier = await db.get(User, UUID(verifier_id))
+        if not verifier:
+            return {
+                "authorized": False,
+                "reason": "Verifier not found",
+            }
+        
+        # Get verifier's verification level
+        level_record = await db.execute(
+            select(UserVerificationLevel).where(
+                UserVerificationLevel.user_id == UUID(verifier_id)
+            )
+        )
+        level = level_record.scalar_one_or_none()
+        
+        # Check verification level (must be at least MINIMAL)
+        if not level or level.current_level == VerificationLevel.UNVERIFIED:
+            return {
+                "authorized": False,
+                "reason": "Verifier must be verified at MINIMAL level or higher",
+            }
+        
+        # Check for verifier profile
+        profile_result = await db.execute(
+            select(VerifierProfile).where(
+                VerifierProfile.user_id == UUID(verifier_id)
+            )
+        )
+        verifier_profile = profile_result.scalar_one_or_none()
+        
+        if not verifier_profile:
+            return {
+                "authorized": False,
+                "reason": "No verifier profile found. User must apply to become a verifier.",
+            }
+        
+        # Check if revoked
+        if verifier_profile.revoked:
+            return {
+                "authorized": False,
+                "reason": "Verifier status has been revoked",
+                "revoked_at": verifier_profile.revoked_at.isoformat() if verifier_profile.revoked_at else None,
+                "revocation_reason": verifier_profile.revocation_reason,
+            }
+        
+        # Check if explicitly authorized
+        if not verifier_profile.is_authorized:
+            return {
+                "authorized": False,
+                "reason": "Verifier authorization pending approval",
+            }
+        
+        # Check credentials
+        credentials = verifier_profile.credentials
+        
+        # Auto-qualified by professional credentials
+        cred_enums = [VerifierCredential(c) for c in credentials if c in [e.value for e in VerifierCredential]]
+        auto_qualified = any(cred in AUTO_VERIFIER_CREDENTIALS for cred in cred_enums)
+        
+        if auto_qualified or verifier_profile.auto_qualified:
+            return {
+                "authorized": True,
+                "credentials": credentials,
+                "auto_qualified": True,
+                "verification_level": level.current_level.value,
+                "verifications_performed": verifier_profile.total_verifications_performed,
+            }
+        
+        # Check if trusted verifier (50+ successful verifications)
+        if verifier_profile.total_verifications_performed >= 50:
+            return {
+                "authorized": True,
+                "credentials": credentials + [VerifierCredential.TRUSTED_VERIFIER.value],
+                "verification_count": verifier_profile.total_verifications_performed,
+                "verification_level": level.current_level.value,
+            }
+        
+        # Check if community leader with good rating
+        if (VerifierCredential.COMMUNITY_LEADER.value in credentials and 
+            verifier_profile.verifier_rating >= 4.0):
+            return {
+                "authorized": True,
+                "credentials": credentials,
+                "rating": verifier_profile.verifier_rating,
+                "verification_level": level.current_level.value,
+            }
+        
+        # Default: authorized if profile exists and is marked authorized
+        return {
+            "authorized": True,
+            "credentials": credentials,
+            "verification_level": level.current_level.value,
+            "verifications_performed": verifier_profile.total_verifications_performed,
+        }
 
 
 @activity.defn(name="validate_verifier_credentials")
