@@ -18,6 +18,10 @@ COPY src ./src
 # Install dependencies
 RUN uv sync --frozen --no-cache
 
+# Ensure the project package and console scripts (uvicorn, etc.) are installed
+RUN python -m pip install --upgrade pip \
+    && python -m pip install .
+
 # Create data directory
 RUN mkdir -p /app/data
 

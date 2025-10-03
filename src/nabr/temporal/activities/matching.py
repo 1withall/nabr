@@ -392,3 +392,38 @@ async def log_matching_event(
     # TODO: Store in dedicated events table
     
     return str(uuid.uuid4())
+
+
+# Class wrapper for workflow compatibility
+class MatchingActivities:
+    """
+    Namespace class for matching activities.
+    
+    This provides a class-based interface for workflows that expect
+    MatchingActivities.activity_name syntax.
+    """
+    find_candidate_volunteers = staticmethod(find_candidate_volunteers)
+    calculate_match_scores = staticmethod(calculate_match_scores)
+    
+    # Add alias for workflow compatibility
+    @staticmethod
+    async def find_potential_acceptors(*args, **kwargs):
+        """Alias for find_candidate_volunteers."""
+        return await find_candidate_volunteers(*args, **kwargs)
+    
+    @staticmethod
+    async def validate_request(request_id: str) -> bool:
+        """Validate that a request exists and is valid for matching."""
+        from nabr.db.session import AsyncSessionLocal
+        
+        async with AsyncSessionLocal() as db:
+            request_result = await db.execute(
+                select(Request).where(Request.id == request_id)
+            )
+            request = request_result.scalar_one_or_none()
+            
+            if not request:
+                return False
+            
+            # Check if request is in a valid state for matching
+            return request.status in ["pending", "open"]

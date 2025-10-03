@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     availability_weight: float = 0.3
     rating_weight: float = 0.2
     distance_weight: float = 0.1
+    matching_skill_weight: float = 0.4
+    matching_availability_weight: float = 0.3
+    matching_rating_weight: float = 0.2
+    matching_distance_weight: float = 0.1
     
     # Rate Limiting
     rate_limit_requests: int = 100

@@ -189,29 +189,88 @@ fi
 # ============================================================================
 # STEP 3: Run Bootstrap Workflow
 # ============================================================================
-log_step "STEP 3: Running Bootstrap Workflow"
+log_step "STEP 3: Running Bootstrap Workflow via Temporal"
 
-log_info "Executing bootstrap workflow via Temporal..."
-log_info "This workflow will:"
-echo "  • Run database migrations (via Alembic)"
-echo "  • Verify database schema"
-echo "  • Run health checks on all services"
-echo "  • Initialize default data (if needed)"
-echo "  • Validate configuration"
+log_info "Bootstrap workflow will execute via Temporal for:"
+echo "  •  Automatic retries with exponential backoff"
+echo "  • Full observability in Temporal UI"
+echo "  • Activity-level error handling and logging"
 echo ""
-log_progress "Starting bootstrap workflow..."
+log_info "Bootstrap tasks include:"
+echo "  • Database migrations (Alembic)"
+echo "  • Database health checks"
+echo "  • Schema validation"
+echo "  • Default data initialization"
+echo "  • Configuration validation"
+echo ""
 
-# Run the bootstrap workflow
+log_progress "Starting temporary bootstrap worker..."
+
+# Start bootstrap worker in background
 cd "$PROJECT_ROOT"
-$PYTHON_CMD -m nabr.temporal.bootstrap 2>&1 | tee "$LOG_DIR/bootstrap.log"
+uv run python -c "
+import asyncio
+import signal
+import sys
+from temporalio.client import Client
+from temporalio.worker import Worker
+from nabr.temporal.workflows.bootstrap import SystemBootstrapWorkflow
+from nabr.temporal.activities.bootstrap import (
+    run_database_migrations,
+    check_database_health,
+    validate_database_schema,
+    initialize_default_data,
+    validate_configuration,
+    run_service_health_checks,
+)
 
-if [ ${PIPESTATUS[0]} -eq 0 ]; then
-    log_info "Bootstrap workflow completed successfully"
-    log_info "View execution details in Temporal UI: http://localhost:8080"
+async def run_worker():
+    client = await Client.connect('localhost:7233', namespace='default')
+    worker = Worker(
+        client,
+        task_queue='bootstrap-queue',
+        workflows=[SystemBootstrapWorkflow],
+        activities=[
+            run_database_migrations,
+            check_database_health,
+            validate_database_schema,
+            initialize_default_data,
+            validate_configuration,
+            run_service_health_checks,
+        ],
+    )
+    print('✓ Bootstrap worker started')
+    await worker.run()
+
+if __name__ == '__main__':
+    asyncio.run(run_worker())
+" > "$LOG_DIR/bootstrap_worker.log" 2>&1 &
+
+BOOTSTRAP_WORKER_PID=$!
+log_info "Bootstrap worker started (PID: $BOOTSTRAP_WORKER_PID)"
+
+# Wait for worker to be ready
+sleep 3
+
+log_progress "Executing bootstrap workflow..."
+
+# Execute bootstrap workflow
+uv run python -m nabr.temporal.bootstrap_runner 2>&1 | tee "$LOG_DIR/bootstrap.log"
+BOOTSTRAP_EXIT_CODE=${PIPESTATUS[0]}
+
+# Stop bootstrap worker
+log_progress "Stopping bootstrap worker..."
+kill $BOOTSTRAP_WORKER_PID 2>/dev/null || true
+wait $BOOTSTRAP_WORKER_PID 2>/dev/null || true
+
+if [ $BOOTSTRAP_EXIT_CODE -eq 0 ]; then
+    log_info "✓ Bootstrap workflow completed successfully"
+    log_info "View execution history: http://localhost:8080"
 else
-    log_error "Bootstrap workflow failed"
+    log_error "✗ Bootstrap workflow failed"
     log_error "Check logs: $LOG_DIR/bootstrap.log"
-    log_error "Check Temporal UI for detailed error: http://localhost:8080"
+    log_error "Check Temporal UI: http://localhost:8080"
+    log_error "Worker logs: $LOG_DIR/bootstrap_worker.log"
     exit 1
 fi
 

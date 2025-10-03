@@ -34,9 +34,8 @@ with workflow.unsafe.imports_passed_through():
         DeactivateAuthMethodInput,
         DeleteProfileInput,
     )
-    from nabr.temporal.workflows.verification.identity_verification import (
-        IdentityVerificationWorkflow,
-        IdentityVerificationInput,
+    from nabr.temporal.workflows.verification.individual_verification import (
+        IndividualVerificationWorkflow,
     )
 
 

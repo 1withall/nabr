@@ -110,6 +110,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    volunteer_profile = relationship(
+        "VolunteerProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     # Legacy verification relationship (will be deprecated)
     verifications_received = relationship(
         "Verification",
@@ -322,6 +328,36 @@ class OrganizationProfile(Base):
 
     def __repr__(self) -> str:
         return f"<OrganizationProfile(user_id={self.user_id}, org={self.organization_name})>"
+
+
+class VolunteerProfile(Base):
+    """Profile for volunteer-specific fields used by matching."""
+
+    __tablename__ = "volunteer_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+
+    # Skills and capabilities (for offering help)
+    skills = Column(Text, nullable=True)  # JSON array stored as text
+    # Availability and preferences
+    availability_schedule = Column(Text, nullable=True)  # JSON schedule
+    max_distance_km = Column(Float, default=25.0)
+    languages_spoken = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="volunteer_profile")
+
+    def __repr__(self) -> str:
+        return f"<VolunteerProfile(user_id={self.user_id})>"
 
 
 class Verification(Base):

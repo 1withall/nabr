@@ -21,4 +21,8 @@ RUN uv sync --frozen --no-cache
 # Create data directory
 RUN mkdir -p /app/data
 
+# Ensure the project package and console scripts are available in the image
+RUN python -m pip install --upgrade pip \
+    && python -m pip install .
+
 CMD ["uv", "run", "python", "-m", "nabr.temporal.worker"]

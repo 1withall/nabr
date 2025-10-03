@@ -348,3 +348,19 @@ async def log_review_event(
     # TODO: Store in dedicated events table
     
     return str(uuid.uuid4())
+
+
+# Class wrapper for workflow compatibility
+class ReviewActivities:
+    """
+    Namespace class for review activities.
+    
+    This provides a class-based interface for workflows that expect
+    ReviewActivities.activity_name syntax.
+    """
+    validate_review_eligibility = staticmethod(validate_review_eligibility)
+    save_review = staticmethod(save_review)
+    update_user_rating = staticmethod(update_user_rating)
+    check_for_moderation = staticmethod(check_for_moderation)
+    notify_reviewee = staticmethod(notify_reviewee)
+    log_review_event = staticmethod(log_review_event)

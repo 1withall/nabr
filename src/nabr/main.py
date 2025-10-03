@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from nabr.api.routes import auth
+from nabr.api.routes import auth, verification
 from nabr.core.config import get_settings
 from nabr.db.session import engine
 from nabr.schemas.base import ErrorResponse
@@ -177,11 +177,16 @@ app.include_router(
     tags=["Authentication"],
 )
 
+app.include_router(
+    verification.router,
+    prefix=settings.api_v1_prefix,
+    tags=["Verification"],
+)
+
 # Additional routers will be added here:
 # app.include_router(users.router, prefix=settings.api_v1_prefix, tags=["Users"])
 # app.include_router(requests.router, prefix=settings.api_v1_prefix, tags=["Requests"])
 # app.include_router(reviews.router, prefix=settings.api_v1_prefix, tags=["Reviews"])
-# app.include_router(verification.router, prefix=settings.api_v1_prefix, tags=["Verification"])
 
 
 if __name__ == "__main__":
